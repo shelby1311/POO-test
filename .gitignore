@@ -5,3 +5,4 @@ data/memory/chromadb/
 data/screenshots/
 data/downloads/
 .env
+.dscode/
