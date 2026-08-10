@@ -1,0 +1,8 @@
+{
+  "cpu_threads": 4,
+  "gpu_layers": 20,
+  "max_ram_gb": 8,
+  "data_directory": "D:\\J.A.R.V.I.S\\data",
+  "hotkey_pause": "esc",
+  "log_level": "INFO"
+}
