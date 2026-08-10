@@ -121,6 +121,21 @@ try:
 except ImportError:
     kill_switch = None  # type: ignore[assignment]
 
+try:
+    import hud_widgets
+except ImportError:
+    hud_widgets = None  # type: ignore[assignment]
+
+try:
+    import security
+except ImportError:
+    security = None  # type: ignore[assignment]
+
+try:
+    import cyber_defense
+except ImportError:
+    cyber_defense = None  # type: ignore[assignment]
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CONSTANTES DE ESTILO HUD — DARK GLASSMORPHISM
@@ -1013,11 +1028,17 @@ class SettingsPanel(QWidget):
 
 class ChatWorker(QThread):
     """
-    Thread que executa brain.pensar() em segundo plano para não
-    congelar a animação 3D do Salles Core.
+    Thread que executa brain.pensar() em segundo plano com streaming.
+
+    Emite sinais:
+      - started: ao iniciar o processamento
+      - streamToken(str): para cada token/palavra gerada em tempo real
+      - finished(dict): ao concluir com o JSON completo
+      - error(str): em caso de falha
     """
 
     started = Signal()
+    streamToken = Signal(str)
     finished = Signal(dict)
     error = Signal(str)
 
@@ -1041,7 +1062,12 @@ class ChatWorker(QThread):
                 if m.get("role") != "system"
             ]
 
-            resultado = brain.pensar(self._prompt, historico_limpo)
+            # ── Modo Streaming: emite cada token via streamToken ──
+            resultado = brain.pensar(
+                self._prompt,
+                historico_limpo,
+                stream_callback=lambda token: self.streamToken.emit(token),
+            )
             self.finished.emit(resultado)
 
         except Exception as exc:
@@ -1074,6 +1100,8 @@ class ChatConsole(QWidget):
         self._ultimo_prompt: str = ""
         self._voz_ativada = True
         self._processando = False
+        self._streaming_buffer: str = ""       # acumula tokens do streaming
+        self._streaming_active: bool = False   # true durante typewriter
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -1152,8 +1180,14 @@ class ChatConsole(QWidget):
         # Notifica Core 3D que estamos processando
         self.coreStateRequest.emit("processing")
 
+        # Abre tag [J.A.R.V.I.S.] para o typewriter streaming
+        self._streaming_buffer = ""
+        self._streaming_active = True
+        self._append_jarvis_open_tag()
+
         self._worker = ChatWorker(prompt, list(self._historico_contexto))
         self._worker.started.connect(self._on_worker_started)
+        self._worker.streamToken.connect(self._on_stream_token)
         self._worker.finished.connect(self._on_worker_finished)
         self._worker.error.connect(self._on_worker_error)
         self._worker.finished.connect(self._worker.deleteLater)
@@ -1162,6 +1196,14 @@ class ChatConsole(QWidget):
 
     def _on_toggle_voz(self, checked: bool) -> None:
         self._voz_ativada = checked
+
+    def _on_stream_token(self, token: str) -> None:
+        """Recebe cada token do streaming e atualiza o display com typewriter effect."""
+        if not self._streaming_active:
+            return
+        self._streaming_buffer += token
+        # Atualiza o texto no final do HTML com o buffer acumulado
+        self._update_streaming_text(self._streaming_buffer)
 
     def _on_worker_started(self) -> None:
         self._append_system("[PROCESSANDO...]")
@@ -1173,8 +1215,13 @@ class ChatConsole(QWidget):
         acao = resultado.get("acao", "falar")
         params = resultado.get("parametros", {})
 
-        # Exibe resposta
-        self._append_jarvis(resposta_voz)
+        # Finaliza o streaming: substitui o texto streaming pelo final
+        if self._streaming_active:
+            self._streaming_active = False
+            self._finalize_streaming_text(resposta_voz)
+        else:
+            # Fallback: modo batch (sem streaming)
+            self._append_jarvis(resposta_voz)
 
         # Executa ação
         acao_resultado = self._executar_acao(acao, params, resposta_voz)
@@ -1260,6 +1307,65 @@ class ChatConsole(QWidget):
         self._history.append(html)
         self._scroll_to_bottom()
 
+    # ── Typewriter Streaming Helpers ──
+
+    def _append_jarvis_open_tag(self) -> None:
+        """Abre a tag [J.A.R.V.I.S.] para início do streaming typewriter."""
+        html = (
+            f'<div style="margin: 6px 0;" id="streaming-block">'
+            f'<span style="color: {COLOR_GREEN}; font-weight: bold;">'
+            f'[J.A.R.V.I.S.]:</span> '
+            f'<span style="color: {COLOR_GREEN};" id="jarvis-stream">'
+            f'<span class="cursor-blink">▌</span></span>'
+            f'</div>'
+        )
+        self._history.append(html)
+        self._scroll_to_bottom()
+
+    def _update_streaming_text(self, texto: str) -> None:
+        """Atualiza o texto em streaming no bloco ativo com cursor piscante."""
+        cursor = self._history.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        # Seleciona o último bloco (streaming)
+        cursor.movePosition(
+            QTextCursor.MoveOperation.StartOfBlock,
+            QTextCursor.MoveMode.MoveAnchor,
+        )
+        cursor.movePosition(
+            QTextCursor.MoveOperation.EndOfBlock,
+            QTextCursor.MoveMode.KeepAnchor,
+        )
+        escaped = self._escape(texto)
+        html = (
+            f'<span style="color: {COLOR_GREEN}; font-weight: bold;">'
+            f'[J.A.R.V.I.S.]:</span> '
+            f'<span style="color: {COLOR_GREEN};">{escaped}'
+            f'<span class="cursor-blink">▌</span></span>'
+        )
+        cursor.insertHtml(html)
+        self._scroll_to_bottom()
+
+    def _finalize_streaming_text(self, texto: str) -> None:
+        """Finaliza o streaming substituindo pelo texto definitivo (sem cursor)."""
+        cursor = self._history.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.movePosition(
+            QTextCursor.MoveOperation.StartOfBlock,
+            QTextCursor.MoveMode.MoveAnchor,
+        )
+        cursor.movePosition(
+            QTextCursor.MoveOperation.EndOfBlock,
+            QTextCursor.MoveMode.KeepAnchor,
+        )
+        escaped = self._escape(texto)
+        html = (
+            f'<span style="color: {COLOR_GREEN}; font-weight: bold;">'
+            f'[J.A.R.V.I.S.]:</span> '
+            f'<span style="color: {COLOR_GREEN};">{escaped}</span>'
+        )
+        cursor.insertHtml(html)
+        self._scroll_to_bottom()
+
     def _scroll_to_bottom(self) -> None:
         cursor = self._history.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -1299,12 +1405,26 @@ class ChatConsole(QWidget):
                 return self._tratar_pesquisar_web(params)
             elif acao == "criar_arquivo":
                 return self._tratar_criar_arquivo(params)
+            elif acao == "gerar_codigo":
+                return self._tratar_gerar_codigo(params)
+            elif acao == "refatorar_codigo":
+                return self._tratar_refatorar_codigo(params)
             elif acao == "analisar_codigo":
                 return self._tratar_analisar_codigo(params)
+            elif acao == "arquitetura":
+                return self._tratar_arquitetura(params)
             elif acao == "diagnostico_windows":
                 return self._tratar_diagnostico_windows(params)
             elif acao == "processar_video":
                 return self._tratar_processar_video(params)
+            elif acao == "cyber_defense":
+                return self._tratar_cyber_defense(params)
+            elif acao == "pentest_recon":
+                return self._tratar_pentest_recon(params)
+            elif acao == "pentest_scan":
+                return self._tratar_pentest_scan(params)
+            elif acao == "pentest_report":
+                return self._tratar_pentest_report(params)
             elif acao == "negar":
                 return (
                     "⛔ Ação negada pelo cérebro: comando potencialmente "
@@ -1327,6 +1447,20 @@ class ChatConsole(QWidget):
         # Se for PowerShell, envolve com powershell -Command
         if shell == "powershell":
             comando = f'powershell -Command "{comando}"'
+
+        # ── Verificação de segurança ──
+        if security is not None:
+            precisa, nivel, msg = security.requires_confirmation(comando)
+            if precisa:
+                reply = QMessageBox.warning(
+                    self,
+                    "SALLES INDUSTRIES — Confirmação de Segurança",
+                    msg,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    return f"⛔ Comando bloqueado por segurança [{nivel}]. Execução cancelada pelo usuário."
 
         sucesso, stdout, stderr = pc_controller.executar_comando_cmd(comando)
         if sucesso:
@@ -1382,6 +1516,84 @@ class ChatConsole(QWidget):
             return f"✅ Arquivo criado: '{caminho}' ({len(conteudo)} caracteres)."
         except OSError as exc:
             return f"❌ Falha ao criar arquivo: {exc}"
+
+    def _tratar_gerar_codigo(self, params: dict) -> str:
+        """Exibe o código gerado pelo cérebro com syntax highlight básico."""
+        linguagem = params.get("linguagem", "desconhecida")
+        codigo = params.get("codigo", "")
+        descricao = params.get("descricao", "")
+        framework = params.get("framework", "")
+
+        if not codigo:
+            return "⚠ Nenhum código foi gerado pelo cérebro."
+
+        # Oferece salvar o código em arquivo
+        lines = [
+            f"💻 CÓDIGO GERADO — {linguagem.upper()}",
+            f"{'─' * 50}",
+            f"📝 Descrição: {descricao}" if descricao else "",
+            f"📦 Framework: {framework}" if framework else "",
+            f"📏 Tamanho: {len(codigo)} caracteres / {len(codigo.splitlines())} linhas",
+            f"",
+            f"```{linguagem}",
+            codigo[:3000],
+        ]
+        if len(codigo) > 3000:
+            lines.append(f"... (truncado — {len(codigo) - 3000} caracteres restantes)")
+        lines.append("```")
+
+        # Salva automaticamente se for um caminho válido
+        lines.append(f"")
+        lines.append(f"💡 Para salvar, diga: 'Jarvis, salve o código como arquivo.py'")
+
+        return "\n".join(l for l in lines if l)
+
+    def _tratar_refatorar_codigo(self, params: dict) -> str:
+        """Exibe o código refatorado."""
+        linguagem = params.get("linguagem", "desconhecida")
+        codigo = params.get("codigo", "")
+        objetivo = params.get("objetivo", "melhoria geral")
+
+        if not codigo:
+            return "⚠ Nenhum código refatorado foi gerado pelo cérebro."
+
+        lines = [
+            f"🔧 CÓDIGO REFATORADO — {linguagem.upper()}",
+            f"{'─' * 50}",
+            f"🎯 Objetivo: {objetivo}",
+            f"📏 Tamanho: {len(codigo)} caracteres",
+            f"",
+            f"```{linguagem}",
+            codigo[:3000],
+        ]
+        if len(codigo) > 3000:
+            lines.append(f"... (truncado)")
+        lines.append("```")
+        return "\n".join(lines)
+
+    def _tratar_arquitetura(self, params: dict) -> str:
+        """Exibe recomendações de arquitetura e design patterns."""
+        problema = params.get("problema", "")
+        requisitos = params.get("requisitos", "")
+        padrao = params.get("padrao", "")
+        recomendacao = params.get("recomendacao", "")
+
+        lines = [
+            f"🏗️ ANÁLISE DE ARQUITETURA",
+            f"{'─' * 50}",
+        ]
+        if problema:
+            lines.append(f"📋 Problema: {problema[:200]}")
+        if requisitos:
+            lines.append(f"📎 Requisitos: {requisitos[:200]}")
+        if padrao:
+            lines.append(f"📐 Pattern sugerido: {padrao}")
+        if recomendacao:
+            lines.append(f"")
+            lines.append(f"📝 Recomendação:")
+            lines.append(recomendacao[:2000])
+
+        return "\n".join(lines)
 
     def _tratar_analisar_codigo(self, params: dict) -> str:
         """Exibe o resultado da análise de código (raciocinio do brain)."""
@@ -1446,6 +1658,176 @@ class ChatConsole(QWidget):
             )
         return "⚠ Não foi possível extrair transcrição do vídeo especificado."
 
+    def _tratar_cyber_defense(self, params: dict) -> str:
+        """Executa scan de defesa cibernética completo."""
+        target_ip = params.get("target_ip") or params.get("ip", "")
+
+        if cyber_defense is None:
+            return "⚠ Módulo cyber_defense indisponível."
+
+        try:
+            report = cyber_defense.generate_defense_report(
+                target_ip=target_ip if target_ip else None
+            )
+
+            summary = report.get("executive_summary", {})
+            intrusion = report.get("intrusion", {}).get("summary", {})
+            vuln = report.get("vulnerabilities", {})
+
+            lines = [
+                f"🛡️ {summary.get('status', 'N/A')}",
+                f"",
+                f"📊 RESUMO EXECUTIVO:",
+                f"   • Alertas de intrusão: {summary.get('intrusion_alerts', 0)}",
+                f"   • Score de risco: {summary.get('vulnerability_risk_score', 0)}/100",
+                f"   • Recomendações de hardening: {summary.get('hardening_recommendations', 0)}",
+                f"",
+                f"🔍 DETECÇÃO DE INTRUSÃO:",
+                f"   • Conexões ativas: {intrusion.get('total_alerts', 0)} alertas",
+                f"   • Status: {intrusion.get('status', 'N/A')}",
+                f"",
+                f"🛡️ VULNERABILIDADES:",
+                f"   • Portas em escuta: {vuln.get('ports', {}).get('total_listening', '?')}",
+                f"   • Firewall: {'ATIVO' if vuln.get('firewall', {}).get('firewall_active') else 'DESATIVADO'}",
+                f"   • Score de risco: {vuln.get('risk_score', '?')}/100",
+            ]
+
+            # Adiciona vulnerabilidades críticas
+            vulns = vuln.get("vulnerabilities", [])
+            if vulns:
+                lines.append(f"")
+                lines.append(f"⚠ VULNERABILIDADES ENCONTRADAS:")
+                for v in vulns[:5]:
+                    lines.append(
+                        f"   [{v.get('severity', '?')}] {v.get('detail', '')}"
+                    )
+
+            # Adiciona recomendações de hardening
+            recommendations = report.get("hardening", {}).get("recommendations", [])
+            if recommendations:
+                lines.append(f"")
+                lines.append(f"🔧 RECOMENDAÇÕES DE HARDENING:")
+                for r in recommendations[:5]:
+                    lines.append(
+                        f"   • [{r.get('risk_reduction', '?')}] "
+                        f"{r.get('description', '')}"
+                    )
+
+            return "\n".join(lines)
+
+        except Exception as exc:
+            return f"❌ Erro ao executar cyber defense scan: {exc}"
+
+    def _tratar_pentest_recon(self, params: dict) -> str:
+        """Executa reconhecimento de pentest autorizado."""
+        target = params.get("target", "")
+        if not target:
+            return "⛔ Target não especificado. Forneça 'target' com IP/domínio autorizado."
+
+        try:
+            import pentest_engine
+        except ImportError:
+            return "⚠ Módulo pentest_engine indisponível."
+
+        engine = pentest_engine.PentestEngine()
+        ok, msg = engine.set_scope(
+            authorized=True, target=target,
+            authorized_by=params.get("authorized_by", "Launcher User"),
+            environment=params.get("environment", "lab"),
+            objective=params.get("objective", "Recon autorizado"),
+        )
+        if not ok:
+            return f"⛔ {msg}"
+
+        recon = engine.recon_target()
+        if "error" in recon:
+            return f"⛔ {recon['error']}"
+
+        return (
+            f"🔍 RECON — {target}\n"
+            f"{'─' * 40}\n"
+            f"   IP: {recon.get('resolved_ip')}\n"
+            f"   Reverse DNS: {recon.get('reverse_dns')}\n"
+            f"   HTTP: {'✅' if recon.get('http_reachable') else '❌'}\n"
+            f"   HTTPS: {'✅' if recon.get('https_reachable') else '❌'}"
+        )
+
+    def _tratar_pentest_scan(self, params: dict) -> str:
+        """Executa scan de portas/serviços do pentest."""
+        target = params.get("target", "")
+        if not target:
+            return "⛔ Target não especificado."
+
+        try:
+            import pentest_engine
+        except ImportError:
+            return "⚠ Módulo pentest_engine indisponível."
+
+        ports_param = params.get("ports", [])
+        ports = ports_param if isinstance(ports_param, list) and ports_param else None
+
+        engine = pentest_engine.PentestEngine()
+        engine.set_scope(
+            authorized=True, target=target,
+            authorized_by=params.get("authorized_by", "Launcher User"),
+            environment=params.get("environment", "lab"),
+        )
+
+        scan = engine.scan_ports(ports)
+        if "error" in scan:
+            return f"⛔ {scan['error']}"
+
+        open_ports = scan.get("open_ports", [])
+        lines = [
+            f"🔍 PORT SCAN — {target}",
+            f"{'─' * 40}",
+            f"   Escaneadas: {scan.get('total_scanned')} portas",
+            f"   Abertas: {len(open_ports)}",
+        ]
+        for p in open_ports[:15]:
+            lines.append(
+                f"   • {p['port']}/tcp — {p['service']}"
+                + (f" [{p['banner'][:50]}]" if p.get('banner') else "")
+            )
+        return "\n".join(lines)
+
+    def _tratar_pentest_report(self, params: dict) -> str:
+        """Gera relatório do pentest."""
+        target = params.get("target", "")
+        if not target:
+            return "⛔ Target não especificado."
+
+        try:
+            import pentest_engine
+        except ImportError:
+            return "⚠ Módulo pentest_engine indisponível."
+
+        ports_param = params.get("ports", [])
+        ports = ports_param if isinstance(ports_param, list) and ports_param else None
+
+        results = pentest_engine.quick_pentest(
+            target=target, ports=ports,
+            authorized_by=params.get("authorized_by", "Launcher User"),
+            environment=params.get("environment", "lab"),
+        )
+
+        if "error" in results:
+            return f"⛔ {results['error']}"
+
+        summary = results.get("report", {}).get("executive_summary", {})
+        return (
+            f"📋 PENTEST REPORT — {target}\n"
+            f"{'─' * 40}\n"
+            f"   Descobertas: {summary.get('total_findings', 0)}\n"
+            f"   Risk Level: {summary.get('risk_level', 'N/A')}\n"
+            f"   Risk Score: {summary.get('risk_score', 0)}\n"
+            f"   🔴 CRITICAL: {summary.get('severity_breakdown', {}).get('CRITICAL', 0)}\n"
+            f"   🟠 HIGH: {summary.get('severity_breakdown', {}).get('HIGH', 0)}\n"
+            f"   🟡 MEDIUM: {summary.get('severity_breakdown', {}).get('MEDIUM', 0)}\n"
+            f"\n"
+            f"💡 Relatório completo via pentest_engine.export_report_markdown()"
+        )
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # JANELA PRINCIPAL — SALLES INDUSTRIES Quantum OS Launcher v2.0
@@ -1497,8 +1879,14 @@ class LauncherWindow(QMainWindow):
         sep.setFixedHeight(2)
         left_panel.addWidget(sep)
 
-        # Salles Core 3D
-        self._reactor = SallesCore3DWidget()
+        # Salles Core 3D (OpenGL com fallback para QPainter)
+        if hud_widgets is not None:
+            try:
+                self._reactor = hud_widgets.SallesCore3DOpenGLWidget()
+            except Exception:
+                self._reactor = SallesCore3DWidget()
+        else:
+            self._reactor = SallesCore3DWidget()
         self._reactor.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         left_panel.addWidget(self._reactor, stretch=1)
@@ -1570,6 +1958,13 @@ class LauncherWindow(QMainWindow):
         self._chat_console = ChatConsole()
         self._chat_console.coreStateRequest.connect(self._on_core_state_request)
         self._tab_widget.addTab(self._chat_console, "CONSOLO / CHAT")
+
+        # Aba 3: Hardware Monitor
+        if hud_widgets is not None:
+            self._hud_monitor = hud_widgets.HudMonitorPanel()
+            self._tab_widget.addTab(self._hud_monitor, "HARDWARE MONITOR")
+        else:
+            self._hud_monitor = None
 
         root.addWidget(self._tab_widget, stretch=2)
 
@@ -1677,6 +2072,11 @@ class LauncherWindow(QMainWindow):
 
         # Spawna app.py
         app_path = _SCRIPT_DIR / "app.py"
+
+        # Inicia monitor de hardware
+        if self._hud_monitor is not None:
+            self._hud_monitor.start_monitoring()
+
         try:
             self._processo_jarvis = subprocess.Popen(
                 [sys.executable, str(app_path)],
@@ -1714,6 +2114,10 @@ class LauncherWindow(QMainWindow):
         self._restaurar_ui_inativa()
 
     def _restaurar_ui_inativa(self) -> None:
+        # Para monitor de hardware
+        if self._hud_monitor is not None:
+            self._hud_monitor.stop_monitoring()
+
         self._reactor.set_state("standby")
         self._status_label.setText("CORE STANDBY")
         self._status_label.setStyleSheet(

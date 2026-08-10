@@ -1,13 +1,18 @@
 """
 voice_engine.py — Motor de Voz e Áudio do J.A.R.V.I.S. (STT/TTS)
 
-Síntese de fala offline (pyttsx3 + SAPI5) e reconhecimento de voz
+Síntese de fala (pyttsx3 + SAPI5 ou Edge-TTS neural) e reconhecimento de voz
 (speech_recognition + Google STT) totalmente em português.
 
 Inclui coordenação entre fala e escuta: o microfone é pausado
 enquanto o Jarvis fala, evitando que ele processe a própria voz.
+Suporte a barge-in: interrompe a fala quando o usuário começa a falar.
 """
 
+import asyncio
+import os
+import subprocess
+import tempfile
 import threading
 import time
 from typing import Optional
@@ -31,9 +36,26 @@ _tts_lock = threading.Lock()
 # Engine TTS (inicializado sob demanda)
 _engine: Optional[pyttsx3.Engine] = None
 
+# Configuração do motor TTS: "sapi5" ou "edge"
+_tts_engine_type: str = "sapi5"
+
+# Flag para barge-in: True = interromper fala atual
+_barge_in = threading.Event()
+_barge_in.clear()
+
 # Recognizer STT (reutilizável)
 _recognizer: Optional[sr.Recognizer] = None
 _microfone: Optional[sr.Microphone] = None
+
+# Flag para usar normalizador de fala no TTS
+_use_speech_normalizer = True
+
+try:
+    from speech_normalizer import normalize_for_speech, full_pipeline
+except ImportError:
+    _use_speech_normalizer = False
+    def normalize_for_speech(t, **kw): return t
+    def full_pipeline(t, **kw): return t
 
 # ---------------------------------------------------------------------------
 # Helpers internos
@@ -106,36 +128,63 @@ def _obter_recognizer() -> tuple[sr.Recognizer, Optional[sr.Microphone]]:
 # ---------------------------------------------------------------------------
 
 
-def falar(texto: str) -> bool:
+def definir_tts_engine(tipo: str) -> None:
     """
-    Sintetiza o texto em voz (pt-BR) usando pyttsx3/SAPI5.
+    Define o motor TTS: 'sapi5' (offline, nativo) ou 'edge' (neural, alta qualidade).
+    Edge-TTS requer conexão com internet.
+    """
+    global _tts_engine_type
+    if tipo in ("sapi5", "edge"):
+        _tts_engine_type = tipo
+        _log(f"Motor TTS definido: {tipo}")
+    else:
+        _log(f"Motor TTS desconhecido: {tipo}. Use 'sapi5' ou 'edge'.", "WARNING")
 
-    Enquanto fala, sinaliza a flag global _falando para que o listener
-    de microfone pause e não processe a própria voz do Jarvis.
+
+def falar(texto: str, bloquear_barge_in: bool = True) -> bool:
+    """
+    Sintetiza o texto em voz (pt-BR).
+
+    Suporta dois motores:
+      - sapi5 (padrão): pyttsx3 nativo do Windows, offline
+      - edge: Microsoft Edge TTS (neural), alta qualidade, requer internet
+
+    Enquanto fala, sinaliza a flag _falando para que o listener
+    de microfone pause.
+
+    Suporte a barge-in: se _barge_in for setado durante a fala,
+    interrompe imediatamente.
 
     Args:
         texto: Texto a ser falado.
+        bloquear_barge_in: Se True, monitora _barge_in e interrompe a fala.
 
     Returns:
-        True se a fala foi concluída, False em caso de erro.
+        True se a fala foi concluída, False em caso de erro ou interrupção.
     """
     if not texto or not texto.strip():
         return False
 
     texto = texto.strip()
+
+    # ── Normalização fonética para fala natural ──
+    if _use_speech_normalizer:
+        texto = normalize_for_speech(texto, voice_style="jarvis")
+
     _log(f"JARVIS: {texto}")
+
+    # Reset barge-in antes de começar
+    _barge_in.clear()
 
     with _tts_lock:
         try:
-            engine = _obter_engine()
-
             # Sinaliza que está falando → listener pausa
             _falando.set()
 
-            engine.say(texto)
-            engine.runAndWait()
-
-            return True
+            if _tts_engine_type == "edge":
+                return _falar_edge(texto, bloquear_barge_in)
+            else:
+                return _falar_sapi5(texto, bloquear_barge_in)
 
         except Exception as exc:
             _log(f"Erro no TTS: {exc}", "ERROR")
@@ -144,8 +193,99 @@ def falar(texto: str) -> bool:
         finally:
             # Libera o listener
             _falando.clear()
-            # Pequena pausa para o microfone reativar
             time.sleep(0.1)
+
+
+def _falar_sapi5(texto: str, bloquear_barge_in: bool) -> bool:
+    """Síntese via pyttsx3/SAPI5 com suporte a barge-in."""
+    engine = _obter_engine()
+
+    if not bloquear_barge_in:
+        engine.say(texto)
+        engine.runAndWait()
+        return True
+
+    # Modo com barge-in: divide em frases e verifica entre cada uma
+    frases = [f.strip() for f in texto.replace("!", ".").replace("?", ".").split(".") if f.strip()]
+    if not frases:
+        frases = [texto]
+
+    for frase in frases:
+        if _barge_in.is_set():
+            _log("Barge-in acionado — interrompendo fala.", "INFO")
+            engine.stop()
+            return False
+        engine.say(frase)
+        engine.runAndWait()
+
+    return True
+
+
+def _falar_edge(texto: str, bloquear_barge_in: bool) -> bool:
+    """Síntese via Edge-TTS com voz neural de alta qualidade."""
+    try:
+        import edge_tts
+    except ImportError:
+        _log("edge-tts não instalado. Fallback para SAPI5.", "WARNING")
+        return _falar_sapi5(texto, bloquear_barge_in)
+
+    voz = "pt-BR-AntonioNeural"  # Voz masculina pt-BR de alta qualidade
+
+    async def _sintetizar() -> bool:
+        try:
+            communicate = edge_tts.Communicate(texto, voz)
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+                tmp_path = tmp.name
+            await communicate.save(tmp_path)
+
+            # Reproduz com verificação de barge-in (Windows Media.SoundPlayer)
+            proc = subprocess.Popen(
+                ["powershell", "-c",
+                 f"(New-Object Media.SoundPlayer '{tmp_path}').PlaySync()"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            while proc.poll() is None:
+                if bloquear_barge_in and _barge_in.is_set():
+                    proc.terminate()
+                    _log("Barge-in acionado — interrompendo Edge-TTS.", "INFO")
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                    return False
+                time.sleep(0.05)
+
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            return True
+        except Exception as exc:
+            _log(f"Erro no Edge-TTS: {exc}", "ERROR")
+            return False
+
+    try:
+        return asyncio.run(_sintetizar())
+    except RuntimeError:
+        # Event loop já rodando — usa thread
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(asyncio.run, _sintetizar())
+            return future.result(timeout=60)
+
+
+def solicitar_barge_in() -> None:
+    """
+    Aciona o barge-in: interrompe a fala atual do J.A.R.V.I.S.
+    Chamado quando o sistema detecta que o usuário começou a falar.
+    """
+    _barge_in.set()
+    _log("Solicitação de barge-in recebida.", "DEBUG")
+
+
+def barge_in_acionado() -> bool:
+    """Retorna True se o barge-in foi solicitado."""
+    return _barge_in.is_set()
 
 
 def ouvindo() -> bool:

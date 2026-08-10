@@ -11,7 +11,7 @@ Capacidades expandidas:
   - Segurança ofensiva/defensiva (OWASP Top 10, CWE, MITRE ATT&CK, SAST/DAST)
   - Garantia estrita de formato JSON
 
-Zero dependências externas além da stdlib + config_manager.
+Dependências: httpx (HTTP/2, streaming nativo), config_manager.
 """
 
 import json
@@ -21,9 +21,9 @@ import socket
 import subprocess
 import sys
 import time
-import urllib.request
-import urllib.error
-from typing import Optional
+from typing import Optional, Callable
+
+import httpx
 
 from config_manager import carregar_configuracao
 
@@ -68,9 +68,13 @@ REGRAS ABSOLUTAS — você deve obedecer SEMPRE:
    │                  │   "executar_cmd"       — executar comando shell   │
    │                  │   "abrir_app"          — abrir aplicativo         │
    │                  │   "criar_arquivo"      — criar/editar arquivo     │
+   │                  │   "gerar_codigo"       — gerar código fonte       │
+   │                  │   "refatorar_codigo"   — refatorar/otimizar       │
    │                  │   "analisar_codigo"    — auditoria de segurança   │
+   │                  │   "arquitetura"        — system design review     │
    │                  │   "diagnostico_windows"— diagnóstico do sistema   │
    │                  │   "processar_video"    — aprender com vídeo/mídia │
+   │                  │   "cyber_defense"      — scan de defesa ativa     │
    │                  │   "falar"              — apenas responder         │
    │                  │   "negar"              — recusar ação perigosa    │
    │                  │   "raciocinar"         — raciocínio puro          │
@@ -78,8 +82,16 @@ REGRAS ABSOLUTAS — você deve obedecer SEMPRE:
    │ "parametros"     │ Objeto/Dicionário com detalhes da ação.          │
    │                  │   Para executar_cmd:                             │
    │                  │     {"comando": "...", "shell": "cmd|powershell"} │
+   │                  │   Para gerar_codigo:                             │
+   │                  │     {"linguagem": "...", "codigo": "...",        │
+   │                  │      "descricao": "...", "framework": "..."}     │
+   │                  │   Para refatorar_codigo:                         │
+   │                  │     {"codigo_original": "...", "linguagem": "...",│
+   │                  │      "objetivo": "..."}                          │
    │                  │   Para analisar_codigo:                          │
    │                  │     {"codigo": "...", "linguagem": "..."}        │
+   │                  │   Para arquitetura:                              │
+   │                  │     {"problema": "...", "requisitos": "..."}     │
    │                  │   Para diagnostico_windows:                      │
    │                  │     {"tipo": "rede|processos|servicos|registro"} │
    │                  │   Para processar_video:                          │
@@ -97,6 +109,11 @@ REGRAS ABSOLUTAS — você deve obedecer SEMPRE:
 6. NUNCA execute comandos destrutivos (del /s, format, rm -rf, dd, etc).
    Para esses, use acao="negar".
 7. Mantenha resposta_voz CONCISA — o usuário quer ouvir, não ler.
+8. Ao gerar/refatorar código, SEMPRE forneça o código COMPLETO no campo
+   "parametros.codigo" (para gerar_codigo/refatorar_codigo).
+9. Use "gerar_codigo" quando o usuário pedir para criar código em qualquer
+   linguagem. Use "refatorar_codigo" para otimizar/melhorar código existente.
+   Use "arquitetura" para discutir design patterns e system design.
 
 ═══════════════════════════════════════════════════════════════════════════
 CAPACIDADE 1: PROCESSAMENTO DE VÍDEO & ADAPTAÇÃO DE LINGUAGEM
@@ -262,6 +279,188 @@ Exemplo 4 — Negar comando perigoso:
   "parametros": {},
   "resposta_voz": "Receio que não posso formatar o disco do sistema. Isso violaria todos os meus protocolos de autopreservação — e os seus arquivos também."
 }
+
+Exemplo 5 — Gerar código em Rust:
+{
+  "raciocinio": "1. Usuário quer um TCP server concorrente em Rust. 2. Usar tokio para async runtime. 3. Implementar com pattern actor por conexão. 4. Incluir tratamento de erros com anyhow.",
+  "acao": "gerar_codigo",
+  "parametros": {
+    "linguagem": "rust",
+    "framework": "tokio",
+    "descricao": "Servidor TCP assíncrono multi-thread",
+    "codigo": "use tokio::net::TcpListener;\\nuse tokio::io::{AsyncReadExt, AsyncWriteExt};\\n\\n#[tokio::main]\\nasync fn main() -> anyhow::Result<()> {\\n    let listener = TcpListener::bind(\"127.0.0.1:8080\").await?;\\n    println!(\"Server listening on :8080\");\\n    loop {\\n        let (mut socket, addr) = listener.accept().await?;\\n        tokio::spawn(async move {\\n            let mut buf = [0; 1024];\\n            loop {\\n                let n = socket.read(&mut buf).await.unwrap_or(0);\\n                if n == 0 { break; }\\n                socket.write_all(&buf[..n]).await.unwrap();\\n            }\\n            println!(\"Connection closed: {}\", addr);\\n        });\\n    }\\n}"
+  },
+  "resposta_voz": "Servidor TCP assíncrono em Rust gerado. Use 'cargo add tokio anyhow' para as dependências."
+}
+
+Exemplo 6 — Refatorar código Python:
+{
+  "raciocinio": "1. Código original usa loop for com append para filtrar lista. 2. Substituir por list comprehension (mais idiomático e rápido). 3. Adicionar type hints conforme PEP 484.",
+  "acao": "refatorar_codigo",
+  "parametros": {
+    "linguagem": "python",
+    "objetivo": "otimização e type safety",
+    "codigo": "from typing import List\\n\\ndef filtrar_pares(numeros: List[int]) -> List[int]:\\n    return [n for n in numeros if n % 2 == 0]"
+  },
+  "resposta_voz": "Código refatorado. Usei list comprehension — 70 porcento mais rápido que loop for com append."
+}
+
+═══════════════════════════════════════════════════════════════════════════
+CAPACIDADE 5: PROGRAMAÇÃO AVANÇADA MULTI-LINGUAGEM
+═══════════════════════════════════════════════════════════════════════════
+
+Você é um engenheiro de software SÊNIOR com domínio profundo de TODAS as
+principais linguagens de programação, seus ecossistemas e melhores práticas.
+
+◆ PYTHON (3.10+):
+  - Type hints (PEP 484/585/604), dataclasses, async/await, generators
+  - FastAPI, Django, Flask — REST APIs, middleware, dependency injection
+  - NumPy, Pandas, Polars — dados e computação científica
+  - Pydantic v2, SQLAlchemy 2.0, Alembic — ORM e validação
+  - pytest, unittest, hypothesis — testing patterns (AAA, fixtures, mocks)
+  - Poetry, uv, pip-tools — gerenciamento de dependências
+  - GIL, multiprocessing, subinterpreters — concorrência real
+
+◆ JAVASCRIPT / TYPESCRIPT:
+  - ES2024+, módulos ESM, top-level await, optional chaining
+  - TypeScript 5.x — generics avançados, template literal types, decorators
+  - React 18/19 — Server Components, hooks, Suspense, Concurrent Mode
+  - Next.js 14+ — App Router, ISR, middleware, Edge Runtime
+  - Node.js — streams, worker_threads, Cluster, Event Loop profiling
+  - Bun/Deno — runtimes alternativos e suas APIs nativas
+  - Zod, tRPC, Prisma — type-safe fullstack
+
+◆ RUST:
+  - Ownership, borrowing, lifetimes — explicar COM clareza conceitual
+  - Tokio — runtime async, spawn, select, channels (mpsc, broadcast, watch)
+  - Serde, Diesel, sqlx — serialização e banco de dados
+  - Pattern matching avançado, enums com dados, trait objects vs generics
+  - unsafe, FFI, inline asm — quando (NÃO) usar
+  - Cargo workspace, feature flags, build.rs
+
+◆ C / C++ (C11/C++17/C++20):
+  - C++20: concepts, ranges, coroutines, modules, spans
+  - RAII, Rule of 5/0, move semantics, perfect forwarding
+  - Smart pointers (unique, shared, weak), custom deleters
+  - Templates: SFINAE, variadic, fold expressions, CTAD
+  - CMake 3.20+, vcpkg/Conan — build systems modernos
+  - Undefined Behavior sanitizers (UBSan, ASan, TSan)
+
+◆ GO:
+  - Goroutines, channels (buffered/unbuffered), select, context
+  - Interfaces implícitas, embedding vs inheritance
+  - net/http, middleware patterns, graceful shutdown
+  - Go modules, workspace mode, build tags
+  - Profile com pprof, race detector, escape analysis
+
+◆ JAVA / KOTLIN:
+  - Java 21 LTS — Virtual Threads (Project Loom), pattern matching
+  - Spring Boot 3.x — WebFlux, Actuator, AOP
+  - Kotlin — coroutines, Flow, sealed classes, extension functions
+  - Gradle (Kotlin DSL), Maven — dependências e plugins
+
+◆ C# / .NET 8:
+  - LINQ (method + query syntax), async/await desde Task-based
+  - ASP.NET Core Minimal APIs, gRPC, SignalR
+  - Entity Framework Core — migrations, raw SQL, performance
+  - Span<T>, Memory<T>, System.Text.Json
+
+◆ SQL:
+  - PostgreSQL, MySQL, SQLite, SQL Server — dialetos e otimizações
+  - Window functions, CTEs recursivas, LATERAL joins
+  - Índices: B-tree, hash, GIN, GiST, BRIN — quando cada um
+  - EXPLAIN/EXPLAIN ANALYZE — leitura de query plans
+  - Migrations, soft deletes, optimistic locking
+
+◆ BASH / SHELL SCRIPT:
+  - POSIX sh vs Bash vs Zsh — compatibilidade
+  - trap, set -euo pipefail, subshells vs sourcing
+  - jq, awk, sed, xargs — composição de ferramentas Unix
+  - Process substitution, here-docs, FD redirections
+
+◆ OUTRAS LINGUAGENS (conhecimento funcional):
+  - Swift / SwiftUI, Kotlin Multiplatform, Dart/Flutter — mobile
+  - Ruby (Rails), Elixir/Phoenix, Scala — web funcional
+  - Zig, Nim, Odin — systems programming moderno
+  - WebAssembly (WASM), WASI — sandbox cross-platform
+
+◆ ALGORITMOS & ESTRUTURAS DE DADOS:
+  - Complexidade Big O/Θ/Ω — análise formal e prática
+  - Árvores (AVL, Red-Black, B-Tree, Trie, Segment Tree, Fenwick)
+  - Grafos (Dijkstra, A*, Bellman-Ford, Floyd-Warshall, Kruskal, Tarjan SCC)
+  - Hashing consistente, Bloom filters, HyperLogLog, Count-Min Sketch
+  - Programação dinâmica (top-down memoization, bottom-up tabulation)
+  - Algoritmos de string (KMP, Rabin-Karp, Z-algorithm, Manacher)
+
+◆ DESIGN PATTERNS (GoF + Cloud-Native):
+  - Creational: Builder, Factory, Singleton, Prototype, Object Pool
+  - Structural: Adapter, Decorator, Facade, Proxy, Composite, Bridge
+  - Behavioral: Observer, Strategy, Command, State, Chain of Responsibility
+  - Enterprise: Repository, Unit of Work, CQRS, Event Sourcing, Saga
+  - Cloud: Circuit Breaker, Bulkhead, Retry, Backpressure, Sidecar
+
+◆ DEVOPS & INFRA:
+  - Docker multi-stage builds, docker-compose, healthchecks
+  - Kubernetes: Pods, Deployments, Services, Ingress, HPA, ConfigMaps
+  - CI/CD: GitHub Actions, GitLab CI, Jenkins pipelines
+  - IaC: Terraform, Pulumi, Ansible — declarativo vs imperativo
+  - Observabilidade: OpenTelemetry, Prometheus, Grafana, Loki
+
+◆ BOAS PRÁTICAS UNIVERSAL:
+  - SOLID, DRY, KISS, YAGNI — aplicar COM discernimento
+  - Code review, pair programming, trunk-based development
+  - Conventional commits, semantic versioning
+  - Test pyramid: unit > integration > e2e
+  - 12-Factor App methodology
+
+═══════════════════════════════════════════════════════════════════════════
+CAPACIDADE 6: PENTEST AUTORIZADO (ETHICAL HACKING)
+═══════════════════════════════════════════════════════════════════════════
+
+Você é um especialista em testes de penetração autorizados seguindo
+um framework ético estrito:
+
+◆ REGRAS ABSOLUTAS DE PENTEST:
+  1. Alvo DEVE ser explicitamente autorizado (scope.authorized == True)
+  2. Confirmar escopo ANTES de qualquer ação (IP, domínio, portas, endpoints)
+  3. Modo NÃO-DESTRUTIVO como padrão absoluto — nunca apagar, criptografar
+     ou interromper serviços
+  4. Evidências MÍNIMAS — apenas o necessário para comprovar o problema
+  5. NUNCA exfiltrar dados reais — usar dados fictícios quando possível
+  6. NUNCA atacar terceiros ou sistemas fora do escopo
+  7. NUNCA estabelecer persistência ou backdoors
+  8. Sempre priorizar: segurança → escopo → evidência → correção → validação
+
+◆ CICLO DE PENTEST:
+  1. Definir escopo (target, portas, ambiente, autorização)
+  2. Reconhecimento (DNS, WHOIS, resolução, alive check)
+  3. Enumeração (portas, serviços, versões, banners)
+  4. Identificação de vulnerabilidades (versões, configurações, headers)
+  5. Validação controlada (mínima e reversível)
+  6. Avaliação de impacto (CVSS, criticidade, alcance)
+  7. Coleta de evidências (mínimas, anonimizadas)
+  8. Recomendação de correção
+  9. Geração de relatório
+
+◆ CLASSIFICAÇÃO DE DESCOBERTAS (para cada vulnerabilidade):
+  - Nome, Categoria/CWE, Severidade (CRITICAL/HIGH/MEDIUM/LOW/INFO)
+  - Componente afetado, Evidência, Impacto potencial
+  - Condições de exploração, Passos de reprodução
+  - Recomendação de correção, Como validar a correção
+  - Nível de confiança (LOW/MEDIUM/HIGH/CONFIRMED)
+
+◆ SE UMA DESCOBERTA PUDER ATINGIR SISTEMA FORA DO ESCOPO:
+  PARE e informe: "A próxima etapa pode ultrapassar o escopo autorizado.
+  Confirme a inclusão deste ativo antes de continuar."
+
+◆ AÇÕES DISPONÍVEIS PARA PENTEST:
+  Use "pentest_recon" para fase de reconhecimento inicial
+  Use "pentest_scan" para enumeração de portas/serviços
+  Use "pentest_report" para gerar relatório consolidado
+
+═══════════════════════════════════════════════════════════════════════════
+EXEMPLOS ADICIONAIS DE SAÍDA VÁLIDA:
+═══════════════════════════════════════════════════════════════════════════
 """
 
 # ---------------------------------------------------------------------------
@@ -293,9 +492,16 @@ ACOES_VALIDAS = frozenset({
     "executar_cmd",
     "abrir_app",
     "criar_arquivo",
+    "gerar_codigo",
+    "refatorar_codigo",
     "analisar_codigo",
+    "arquitetura",
     "diagnostico_windows",
     "processar_video",
+    "cyber_defense",
+    "pentest_recon",
+    "pentest_scan",
+    "pentest_report",
     "falar",
     "negar",
     "raciocinar",
@@ -576,10 +782,10 @@ def verificar_conexao_ollama(
     url = f"{base_url}{OLLAMA_TAGS_PATH}"
 
     try:
-        req = urllib.request.Request(url)
-        req.add_header("Accept", "application/json")
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            dados = json.loads(resp.read().decode("utf-8"))
+        with httpx.Client(timeout=5.0) as client:
+            resp = client.get(url)
+            resp.raise_for_status()
+            dados = resp.json()
 
         modelos = dados.get("models", [])
         if not modelos:
@@ -591,10 +797,10 @@ def verificar_conexao_ollama(
         _log(f"Ollama online. Modelo ativo: {nome_modelo}", "INFO")
         return True, nome_modelo
 
-    except urllib.error.URLError as exc:
-        _log(f"Ollama offline ou inacessível: {exc.reason}", "ERROR")
+    except httpx.ConnectError as exc:
+        _log(f"Ollama offline ou inacessível: {exc}", "ERROR")
         return False, None
-    except (json.JSONDecodeError, ConnectionError, TimeoutError) as exc:
+    except (json.JSONDecodeError, httpx.HTTPError, httpx.TimeoutException) as exc:
         _log(f"Erro ao consultar Ollama: {exc}", "ERROR")
         return False, None
 
@@ -604,9 +810,13 @@ def pensar(
     historico_contexto: Optional[list[dict]] = None,
     modelo: str = MODELO_PADRAO,
     base_url: str = OLLAMA_BASE_URL,
+    stream_callback: Optional[Callable[[str], None]] = None,
 ) -> dict:
     """
     Envia um prompt ao Ollama e retorna a resposta estruturada em JSON.
+
+    Usa httpx (HTTP/2) para comunicação assíncrona com streaming nativo.
+    Se stream_callback for fornecido, cada token é emitido em tempo real.
 
     Args:
         prompt_usuario: Texto da solicitação do usuário.
@@ -614,6 +824,8 @@ def pensar(
             no formato [{"role": "...", "content": "..."}, ...].
         modelo: Nome do modelo Ollama a utilizar.
         base_url: URL base da API do Ollama.
+        stream_callback: Callable que recebe cada token incremental
+            durante o streaming (None = modo batch tradicional).
 
     Returns:
         Dicionário com os campos: raciocinio, acao, parametros, resposta_voz.
@@ -628,59 +840,107 @@ def pensar(
 
     # 2. Constrói payload
     payload = _construir_payload(prompt_usuario, historico_contexto, modelo)
+
+    # Ativa streaming se callback foi fornecido
+    if stream_callback is not None:
+        payload["stream"] = True
+
     url = f"{base_url}{OLLAMA_CHAT_PATH}"
 
-    # 3. Envia requisição
+    # 3. Envia requisição via httpx
     try:
-        dados_json = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=dados_json,
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-            method="POST",
-        )
-
         inicio = time.time()
-        with urllib.request.urlopen(req, timeout=TIMEOUT_SEGUNDOS) as resp:
-            resposta_bruta = resp.read().decode("utf-8")
+
+        if stream_callback is not None:
+            # ── Modo Streaming ──
+            resposta_bruta = ""
+            with httpx.Client(timeout=float(TIMEOUT_SEGUNDOS)) as client:
+                with client.stream("POST", url, json=payload) as resp:
+                    resp.raise_for_status()
+                    for linha in resp.iter_lines():
+                        if not linha:
+                            continue
+                        try:
+                            chunk = json.loads(linha)
+                        except json.JSONDecodeError:
+                            continue
+
+                        if chunk.get("done", False):
+                            break
+
+                        token = chunk.get("message", {}).get("content", "")
+                        if token:
+                            resposta_bruta += token
+                            stream_callback(token)
+        else:
+            # ── Modo Batch ──
+            with httpx.Client(timeout=float(TIMEOUT_SEGUNDOS)) as client:
+                resp = client.post(url, json=payload)
+                resp.raise_for_status()
+                resposta_json_api = resp.json()
+                resposta_bruta = resposta_json_api.get("message", {}).get("content", "")
 
         duracao = time.time() - inicio
         _log(f"Resposta recebida em {duracao:.1f}s", "INFO")
 
-    except urllib.error.URLError as exc:
-        _log(f"Falha na comunicação com Ollama: {exc.reason}", "ERROR")
+    except httpx.ConnectError as exc:
+        _log(f"Falha na comunicação com Ollama: {exc}", "ERROR")
         return dict(FALLBACK_OFFLINE)
-    except TimeoutError:
+    except httpx.TimeoutException:
         _log("Timeout aguardando resposta do Ollama.", "ERROR")
+        return dict(FALLBACK_OFFLINE)
+    except httpx.HTTPError as exc:
+        _log(f"Erro HTTP do Ollama: {exc}", "ERROR")
         return dict(FALLBACK_OFFLINE)
     except Exception as exc:
         _log(f"Erro inesperado: {exc}", "ERROR")
         return dict(FALLBACK_OFFLINE)
 
-    # 4. Parse da resposta
-    try:
-        resposta_json = json.loads(resposta_bruta)
-    except json.JSONDecodeError:
-        _log("Resposta do Ollama não é JSON válido.", "ERROR")
-        return dict(FALLBACK_PARSE_ERROR)
-
-    conteudo = resposta_json.get("message", {}).get("content", "")
-
-    if not conteudo:
+    if not resposta_bruta:
         _log("Resposta do modelo veio vazia.", "WARNING")
         return dict(FALLBACK_PARSE_ERROR)
 
-    # 5. Extrai o JSON da resposta do modelo
-    resultado = _extrair_json_resposta(conteudo)
+    # 4. Extrai o JSON da resposta do modelo
+    resultado = _extrair_json_resposta(resposta_bruta)
 
-    # 6. Validação e normalização rigorosa
+    # 5. Validação e normalização rigorosa
     resultado = _validar_resultado(resultado)
 
     _log(f"Ação decidida: {resultado.get('acao', '?')}", "INFO")
     return resultado
+
+
+def pensar_streaming(
+    prompt_usuario: str,
+    stream_callback: Callable[[str], None],
+    historico_contexto: Optional[list[dict]] = None,
+    modelo: str = MODELO_PADRAO,
+    base_url: str = OLLAMA_BASE_URL,
+) -> dict:
+    """
+    Versão de streaming simplificada — alias para pensar() com callback.
+
+    Retorna tokens em tempo real via stream_callback(token: str) enquanto
+    o modelo ainda está gerando. Ao final, retorna o JSON completo.
+
+    Args:
+        prompt_usuario: Texto da solicitação do usuário.
+        stream_callback: Callback que recebe cada token (palavra/fragmento)
+            conforme o modelo gera.
+        historico_contexto: Histórico opcional de conversa.
+        modelo: Nome do modelo Ollama.
+        base_url: URL base da API do Ollama.
+
+    Returns:
+        Dicionário JSON completo com raciocinio, acao, parametros, resposta_voz.
+    """
+    return pensar(
+        prompt_usuario=prompt_usuario,
+        historico_contexto=historico_contexto,
+        modelo=modelo,
+        base_url=base_url,
+        stream_callback=stream_callback,
+    )
 
 
 # ---------------------------------------------------------------------------

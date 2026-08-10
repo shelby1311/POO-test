@@ -13,12 +13,17 @@ import subprocess
 import time
 import datetime
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable
 
 import pyautogui
 
 from config_manager import carregar_configuracao, validar_e_preparar_ambiente
 from kill_switch import verificar_interrupcao, esta_acionado
+
+try:
+    import security
+except ImportError:
+    security = None  # type: ignore[assignment]
 
 # ---------------------------------------------------------------------------
 # Configuração do pyautogui
@@ -212,6 +217,8 @@ def executar_comando_cmd(
     comando: str,
     timeout: int = 30,
     shell: bool = True,
+    confirmation_callback: Optional[Callable[[str, str], bool]] = None,
+    dry_run: bool = False,
 ) -> Tuple[bool, str, str]:
     """
     Executa um comando no terminal e retorna stdout, stderr.
@@ -220,6 +227,10 @@ def executar_comando_cmd(
         comando: Comando a ser executado.
         timeout: Tempo máximo de espera em segundos.
         shell: Se True, passa pela shell do sistema.
+        confirmation_callback: Se fornecido, chamado para comandos perigosos
+            com a assinatura callback(mensagem, nivel) -> bool.
+            Retorna True se o usuário confirmou.
+        dry_run: Se True, apenas simula (não executa de fato).
 
     Returns:
         Tupla (sucesso: bool, stdout: str, stderr: str).
@@ -229,6 +240,30 @@ def executar_comando_cmd(
 
     if not _verificar_antes_acao(nome_acao):
         return False, "", "Cancelado pelo usuário (kill-switch)."
+
+    # ── Verificação de segurança ──
+    if security is not None:
+        precisa, nivel, msg = security.requires_confirmation(comando)
+        if precisa:
+            _log(f"Comando requer confirmação [{nivel}]: {comando[:80]}", "WARNING")
+            if confirmation_callback is not None:
+                if not confirmation_callback(msg, nivel):
+                    _log("Comando cancelado pelo usuário (security check).", "WARNING")
+                    return False, "", "Cancelado pelo usuário (confirmação de segurança)."
+            else:
+                _log(
+                    f"Comando [{nivel}] BLOQUEADO — sem callback de confirmação.",
+                    "WARNING",
+                )
+                return False, "", (
+                    f"Comando bloqueado por segurança [{nivel}]. "
+                    f"Confirmação do usuário necessária."
+                )
+
+    # ── Modo Dry-Run ──
+    if dry_run:
+        _log(f"[DRY-RUN] Simulação: '{comando[:80]}'", "INFO")
+        return True, f"[DRY-RUN] Comando simulado: {comando}", ""
 
     try:
         resultado = subprocess.run(

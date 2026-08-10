@@ -109,14 +109,35 @@ def _executar_acao(resultado: dict) -> None:
     elif acao == "criar_arquivo":
         _tratar_criar_arquivo(params, resposta)
 
+    elif acao == "gerar_codigo":
+        _tratar_gerar_codigo(params, resposta)
+
+    elif acao == "refatorar_codigo":
+        _tratar_refatorar_codigo(params, resposta)
+
     elif acao == "analisar_codigo":
         _tratar_analisar_codigo(params, resposta)
+
+    elif acao == "arquitetura":
+        _tratar_arquitetura(params, resposta)
 
     elif acao == "diagnostico_windows":
         _tratar_diagnostico_windows(params, resposta)
 
     elif acao == "processar_video":
         _tratar_processar_video(params, resposta)
+
+    elif acao == "cyber_defense":
+        _tratar_cyber_defense(params, resposta)
+
+    elif acao == "pentest_recon":
+        _tratar_pentest_recon(params, resposta)
+
+    elif acao == "pentest_scan":
+        _tratar_pentest_scan(params, resposta)
+
+    elif acao == "pentest_report":
+        _tratar_pentest_report(params, resposta)
 
     elif acao == "negar":
         _log("Acao negada pelo cerebro (comando perigoso).", "WARNING")
@@ -228,6 +249,51 @@ def _tratar_criar_arquivo(params: dict, resposta_padrao: str) -> None:
         voice_engine.falar(f"Nao consegui criar o arquivo, senhor. {exc}")
 
 
+def _tratar_gerar_codigo(params: dict, resposta_padrao: str) -> None:
+    """Exibe código gerado com opção de salvar."""
+    codigo = params.get("codigo", "")
+    linguagem = params.get("linguagem", "desconhecida")
+    if not codigo:
+        voice_engine.falar("Nenhum código foi gerado, senhor.")
+        return
+    _log(f"Código {linguagem} gerado: {len(codigo)} caracteres")
+    print(f"\n{'─' * 50}")
+    print(codigo[:2000])
+    if len(codigo) > 2000:
+        print(f"... ({len(codigo) - 2000} caracteres restantes)")
+    print(f"{'─' * 50}\n")
+
+
+def _tratar_refatorar_codigo(params: dict, resposta_padrao: str) -> None:
+    """Exibe código refatorado."""
+    codigo = params.get("codigo", "")
+    linguagem = params.get("linguagem", "desconhecida")
+    objetivo = params.get("objetivo", "melhoria geral")
+    if not codigo:
+        voice_engine.falar("Nenhum código refatorado foi gerado, senhor.")
+        return
+    _log(f"Código refatorado ({linguagem}, objetivo={objetivo}): {len(codigo)} caracteres")
+    print(f"\n{'─' * 50}")
+    print(codigo[:2000])
+    if len(codigo) > 2000:
+        print(f"... ({len(codigo) - 2000} caracteres restantes)")
+    print(f"{'─' * 50}\n")
+
+
+def _tratar_arquitetura(params: dict, resposta_padrao: str) -> None:
+    """Exibe recomendações de arquitetura."""
+    problema = params.get("problema", "")
+    padrao = params.get("padrao", "")
+    recomendacao = params.get("recomendacao", "")
+    _log(f"Análise de arquitetura — pattern: {padrao or 'não especificado'}")
+    if recomendacao:
+        print(f"\n{'─' * 50}")
+        print(f"📐 ARQUITETURA: {padrao}" if padrao else "📐 ARQUITETURA")
+        print(f"{'─' * 50}")
+        print(recomendacao[:2000])
+        print(f"{'─' * 50}\n")
+
+
 def _tratar_analisar_codigo(params: dict, resposta_padrao: str) -> None:
     """Exibe resultado da analise de seguranca de codigo."""
     codigo = params.get("codigo", "")
@@ -317,6 +383,38 @@ def _tratar_processar_video(params: dict, resposta_padrao: str) -> None:
         _log(f"Erro ao processar video: {exc}", "ERROR")
         voice_engine.falar(
             "Houve um erro ao processar o video, senhor."
+        )
+
+
+def _tratar_cyber_defense(params: dict, resposta_padrao: str) -> None:
+    """Executa scan de defesa cibernética completo."""
+    try:
+        import cyber_defense
+    except ImportError:
+        _log("Módulo cyber_defense indisponível.", "ERROR")
+        voice_engine.falar(
+            "Módulo de defesa cibernética indisponível, senhor."
+        )
+        return
+
+    target_ip = params.get("target_ip") or params.get("ip", "")
+    _log("Executando Cyber Defense Shield scan completo...")
+
+    try:
+        report = cyber_defense.generate_defense_report(
+            target_ip=target_ip if target_ip else None
+        )
+        summary = report.get("executive_summary", {})
+
+        _log(f"Cyber Defense: {summary.get('status', 'N/A')}")
+        voice_engine.falar(
+            f"Scan de defesa concluído, senhor. "
+            f"{summary.get('status', 'Sistema verificado')}."
+        )
+    except Exception as exc:
+        _log(f"Erro no Cyber Defense: {exc}", "ERROR")
+        voice_engine.falar(
+            "Houve um erro ao executar o scan de defesa, senhor."
         )
 
 

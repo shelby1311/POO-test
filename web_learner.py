@@ -1068,6 +1068,231 @@ def estatisticas_memoria() -> dict:
     }
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# WHISPER LOCAL — Transcrição de áudio/vídeo com faster-whisper
+# ═══════════════════════════════════════════════════════════════════════════
+
+_whisper_model = None
+"""Cache do modelo Whisper carregado."""
+
+
+def _obter_modelo_whisper(model_size: str = "base"):
+    """Carrega e cacheia o modelo faster-whisper sob demanda."""
+    global _whisper_model
+    if _whisper_model is not None:
+        return _whisper_model
+    try:
+        from faster_whisper import WhisperModel
+        _log(f"Carregando modelo faster-whisper '{model_size}'...", "INFO")
+        _whisper_model = WhisperModel(
+            model_size, device="cpu", compute_type="int8")
+        _log("Modelo Whisper carregado com sucesso.", "INFO")
+        return _whisper_model
+    except ImportError:
+        _log("faster-whisper não instalado. Use: pip install faster-whisper", "ERROR")
+        return None
+    except Exception as exc:
+        _log(f"Falha ao carregar Whisper: {exc}", "ERROR")
+        return None
+
+
+def transcrever_audio_whisper(
+    audio_path: str,
+    model_size: str = "base",
+    idioma: str = "pt",
+) -> str:
+    """
+    Transcreve um arquivo de áudio/vídeo usando faster-whisper local.
+
+    Suporta formatos: .wav, .mp3, .mp4, .ogg, .flac, .m4a, .webm, etc.
+
+    Args:
+        audio_path: Caminho para o arquivo de áudio/vídeo.
+        model_size: Tamanho do modelo ('tiny', 'base', 'small', 'medium', 'large-v2').
+        idioma: Código do idioma (None = auto-detecção).
+
+    Returns:
+        Texto transcrito, ou string vazia em caso de falha.
+    """
+    if not os.path.isfile(audio_path):
+        _log(f"Arquivo não encontrado: {audio_path}", "ERROR")
+        return ""
+
+    model = _obter_modelo_whisper(model_size)
+    if model is None:
+        return ""
+
+    _log(f"Transcrevendo: {audio_path} (modelo={model_size}, idioma={idioma})", "INFO")
+
+    try:
+        segments, info = model.transcribe(
+            audio_path,
+            language=idioma if idioma else None,
+            beam_size=5,
+            vad_filter=True,
+        )
+
+        texto = " ".join(segment.text for segment in segments).strip()
+
+        _log(
+            f"Transcrição concluída: {len(texto)} caracteres, "
+            f"idioma detectado={info.language} (prob={info.language_probability:.2f})",
+            "INFO",
+        )
+        return texto
+
+    except Exception as exc:
+        _log(f"Erro na transcrição Whisper: {exc}", "ERROR")
+        return ""
+
+
+def baixar_audio_youtube(url: str, output_dir: str = ".") -> str | None:
+    """
+    Baixa o áudio de um vídeo do YouTube usando yt-dlp.
+
+    Args:
+        url: URL do vídeo do YouTube.
+        output_dir: Diretório de destino para o áudio.
+
+    Returns:
+        Caminho do arquivo de áudio baixado (.mp3), ou None em caso de falha.
+    """
+    try:
+        import yt_dlp
+    except ImportError:
+        _log("yt-dlp não instalado. Use: pip install yt-dlp", "ERROR")
+        return None
+
+    os.makedirs(output_dir, exist_ok=True)
+    output_template = os.path.join(output_dir, "%(title)s.%(ext)s")
+
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": output_template,
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "mp3",
+            "preferredquality": "192",
+        }],
+        "quiet": True,
+        "no_warnings": True,
+    }
+
+    _log(f"Baixando áudio do YouTube: {url[:80]}...", "INFO")
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = info.get("title", "audio")
+            # yt-dlp renomeia para .mp3 após o post-processing
+            filename = os.path.join(output_dir, f"{title}.mp3")
+            # Sanitiza nome do arquivo
+            safe_title = "".join(
+                c for c in title if c.isalnum() or c in " _-").strip()
+            filename_safe = os.path.join(output_dir, f"{safe_title}.mp3")
+
+            if os.path.isfile(filename_safe):
+                _log(f"Áudio baixado: {filename_safe}", "INFO")
+                return filename_safe
+            elif os.path.isfile(filename):
+                _log(f"Áudio baixado: {filename}", "INFO")
+                return filename
+
+            # Tenta encontrar qualquer .mp3 no diretório
+            for f in os.listdir(output_dir):
+                if f.endswith(".mp3"):
+                    found = os.path.join(output_dir, f)
+                    _log(f"Áudio encontrado: {found}", "INFO")
+                    return found
+
+            _log("Áudio baixado mas arquivo .mp3 não localizado.", "WARNING")
+            return None
+
+    except Exception as exc:
+        _log(f"Falha ao baixar áudio do YouTube: {exc}", "ERROR")
+        return None
+
+
+def processar_video_com_whisper(
+    url: str | None = None,
+    caminho: str | None = None,
+    model_size: str = "base",
+    idioma: str = "pt",
+) -> tuple[int, dict]:
+    """
+    Pipeline completo: download (se URL) → transcrição Whisper → chunking → ChromaDB.
+
+    Args:
+        url: URL do YouTube (opcional).
+        caminho: Caminho para arquivo de áudio/vídeo local (opcional).
+        model_size: Tamanho do modelo Whisper.
+        idioma: Código do idioma.
+
+    Returns:
+        Tupla (num_chunks_armazenados, padroes_detectados).
+    """
+    audio_path = None
+    temp_dir = None
+
+    try:
+        if url and ("youtube.com" in url or "youtu.be" in url):
+            # Cria diretório temporário para o download
+            config = carregar_configuracao()
+            data_dir = config.get("data_directory", "data")
+            temp_dir = os.path.join(data_dir, "downloads", "whisper_temp")
+            audio_path = baixar_audio_youtube(url, temp_dir)
+        elif caminho:
+            audio_path = caminho
+
+        if not audio_path or not os.path.isfile(audio_path):
+            _log("Nenhum arquivo de áudio disponível para transcrição.", "ERROR")
+            return 0, {}
+
+        # Transcrição
+        transcricao = transcrever_audio_whisper(audio_path, model_size, idioma)
+        if not transcricao or len(transcricao.strip()) < 50:
+            _log("Transcrição muito curta ou vazia.", "WARNING")
+            return 0, {}
+
+        # Padrões comunicativos
+        padroes = _extrair_padroes_comunicativos(transcricao)
+
+        # Chunking e armazenamento
+        chunks = _dividir_em_chunks(transcricao)
+        backend = _obter_backend()
+        agora = datetime.now(timezone.utc).isoformat()
+        fonte = url or caminho or "whisper_transcricao"
+
+        metadados = {
+            "fonte": fonte,
+            "topico": "transcricao_whisper",
+            "data": agora,
+            "titulo": f"Transcrição Whisper: {fonte[:100]}",
+            "tipo": "transcricao_audio",
+            "idiomas": ",".join(padroes.get("idiomas_detectados", [])),
+        }
+
+        if chunks:
+            backend.adicionar(chunks, metadados)
+            _log(f"{len(chunks)} chunk(s) da transcrição armazenados.", "INFO")
+
+        # Padrões linguísticos
+        _armazenar_padroes_linguisticos(padroes, fonte, agora)
+
+        # Limpeza: remove arquivo temporário
+        if temp_dir and audio_path and audio_path.startswith(temp_dir):
+            try:
+                os.remove(audio_path)
+            except OSError:
+                pass
+
+        return len(chunks), padroes
+
+    except Exception as exc:
+        _log(f"Erro no pipeline Whisper: {exc}", "ERROR")
+        return 0, {}
+
+
 # ---------------------------------------------------------------------------
 # Teste direto
 # ---------------------------------------------------------------------------
