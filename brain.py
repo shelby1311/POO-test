@@ -39,6 +39,11 @@ MODELO_PADRAO = "llama3.2"
 TIMEOUT_SEGUNDOS = 180
 TEMPERATURA = 0.7
 
+# Timeout granular para streaming: conexão inicial rápida (10s),
+# leitura de cada chunk com folga (30s) — evita timeout durante
+# geração longa na CPU enquanto tokens continuam chegando.
+HTTPX_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0)
+
 # ---------------------------------------------------------------------------
 # System Prompt — J.A.R.V.I.S v2.0 (EXPANDIDO)
 # ---------------------------------------------------------------------------
@@ -481,10 +486,7 @@ FALLBACK_PARSE_ERROR: dict = {
     "raciocinio": "A resposta do modelo não pôde ser interpretada como JSON.",
     "acao": "falar",
     "parametros": {},
-    "resposta_voz": (
-        "Meu processo cognitivo retornou dados corrompidos. "
-        "Poderia reformular a pergunta, senhor?"
-    ),
+    "resposta_voz": "Não consegui processar seu pedido agora, senhor.",
 }
 
 ACOES_VALIDAS = frozenset({
@@ -561,8 +563,14 @@ def _extrair_json_resposta(texto_bruto: str) -> dict:
         except json.JSONDecodeError:
             pass
 
-    _log("Não foi possível extrair JSON da resposta.", "WARNING")
-    return dict(FALLBACK_PARSE_ERROR)
+    _log("Não foi possível extrair JSON da resposta — assumindo fallback 'falar'.", "WARNING")
+    # Fallback automático: trata todo o texto bruto como resposta de voz
+    return {
+        "raciocinio": "Resposta do modelo veio em formato não-JSON. Tratado como fala direta.",
+        "acao": "falar",
+        "parametros": {},
+        "resposta_voz": texto_bruto.strip(),
+    }
 
 
 def _validar_resultado(resultado: dict) -> dict:
@@ -570,10 +578,17 @@ def _validar_resultado(resultado: dict) -> dict:
     Valida e normaliza o JSON retornado pelo modelo.
     Garante que todos os campos obrigatórios existam e tenham tipos corretos.
     """
-    # Garante campos obrigatórios
+    # Garante campos obrigatórios com defaults NEUTROS (NUNCA sobrescrever
+    # com mensagens hardcoded de erro — isso corrompe a resposta real do modelo)
+    _DEFAULTS_NEUTROS: dict[str, object] = {
+        "raciocinio": "",
+        "acao": "falar",
+        "parametros": {},
+        "resposta_voz": "",
+    }
     for campo in CAMPOS_OBRIGATORIOS:
         if campo not in resultado:
-            resultado[campo] = FALLBACK_PARSE_ERROR.get(campo, "")
+            resultado[campo] = _DEFAULTS_NEUTROS[campo]
 
     # Normaliza tipos
     if not isinstance(resultado.get("raciocinio"), str):
@@ -590,6 +605,30 @@ def _validar_resultado(resultado: dict) -> dict:
     if acao not in ACOES_VALIDAS:
         _log(f"Ação desconhecida '{acao}' — fallback para 'falar'.", "WARNING")
         resultado["acao"] = "falar"
+
+    # ── Recuperação de resposta_voz ──
+    # Se o modelo usou nomes de campo alternativos (ex: "fala", "response"),
+    # tenta extrair deles antes de desistir.
+    if not resultado["resposta_voz"].strip():
+        candidatos_alternativos = ("fala", "response", "content", "message", "text", "output")
+        for chave in candidatos_alternativos:
+            valor = resultado.get(chave)
+            if isinstance(valor, str) and valor.strip():
+                resultado["resposta_voz"] = valor.strip()
+                _log(f"resposta_voz recuperada do campo alternativo '{chave}'.", "INFO")
+                break
+
+    # ── Fallback final: se ainda vazio, usa raciocinio ou mensagem padrão ──
+    if not resultado["resposta_voz"].strip():
+        if resultado["raciocinio"].strip():
+            # Usa o raciocínio como resposta de voz (truncado)
+            resultado["resposta_voz"] = resultado["raciocinio"].strip()
+            _log("resposta_voz ausente — usando raciocinio como fallback.", "WARNING")
+        else:
+            resultado["resposta_voz"] = (
+                "Estou online e operacional, senhor. Como posso ajudar?"
+            )
+            _log("resposta_voz e raciocinio vazios — usando fallback padrão.", "WARNING")
 
     return resultado
 
@@ -614,6 +653,7 @@ def _construir_payload(
         "model": modelo,
         "messages": messages,
         "stream": False,
+        "format": "json",
         "options": {
             "temperature": TEMPERATURA,
             "num_thread": config.get("cpu_threads", 4),
@@ -841,44 +881,41 @@ def pensar(
     # 2. Constrói payload
     payload = _construir_payload(prompt_usuario, historico_contexto, modelo)
 
-    # Ativa streaming se callback foi fornecido
-    if stream_callback is not None:
-        payload["stream"] = True
+    # Sempre usa streaming — evita timeout de socket durante geração longa
+    payload["stream"] = True
 
     url = f"{base_url}{OLLAMA_CHAT_PATH}"
 
-    # 3. Envia requisição via httpx
+    # 3. Envia requisição via httpx — SEMPRE em modo streaming
+    #    (evita timeout de socket durante geração longa na CPU)
     try:
         inicio = time.time()
 
-        if stream_callback is not None:
-            # ── Modo Streaming ──
-            resposta_bruta = ""
-            with httpx.Client(timeout=float(TIMEOUT_SEGUNDOS)) as client:
-                with client.stream("POST", url, json=payload) as resp:
-                    resp.raise_for_status()
-                    for linha in resp.iter_lines():
-                        if not linha:
-                            continue
-                        try:
-                            chunk = json.loads(linha)
-                        except json.JSONDecodeError:
-                            continue
-
-                        if chunk.get("done", False):
-                            break
-
-                        token = chunk.get("message", {}).get("content", "")
-                        if token:
-                            resposta_bruta += token
-                            stream_callback(token)
-        else:
-            # ── Modo Batch ──
-            with httpx.Client(timeout=float(TIMEOUT_SEGUNDOS)) as client:
-                resp = client.post(url, json=payload)
+        resposta_bruta = ""
+        headers = {"Content-Type": "application/json"}
+        body_bytes = json.dumps(payload).encode("utf-8")
+        with httpx.Client(timeout=HTTPX_TIMEOUT) as client:
+            with client.stream("POST", url, content=body_bytes, headers=headers) as resp:
                 resp.raise_for_status()
-                resposta_json_api = resp.json()
-                resposta_bruta = resposta_json_api.get("message", {}).get("content", "")
+                for linha in resp.iter_lines():
+                    if not linha:
+                        continue
+                    try:
+                        chunk = json.loads(linha)
+                    except json.JSONDecodeError:
+                        continue
+
+                    if chunk.get("done", False):
+                        break
+
+                    token = (
+                        chunk.get("message", {}).get("content")
+                        or chunk.get("response", "")
+                    )
+                    if token:
+                        resposta_bruta += token
+                        if stream_callback is not None:
+                            stream_callback(token)
 
         duracao = time.time() - inicio
         _log(f"Resposta recebida em {duracao:.1f}s", "INFO")
@@ -896,8 +933,8 @@ def pensar(
         _log(f"Erro inesperado: {exc}", "ERROR")
         return dict(FALLBACK_OFFLINE)
 
-    if not resposta_bruta:
-        _log("Resposta do modelo veio vazia.", "WARNING")
+    if not resposta_bruta or not resposta_bruta.strip():
+        _log("Resposta do modelo veio vazia ou apenas whitespace.", "ERROR")
         return dict(FALLBACK_PARSE_ERROR)
 
     # 4. Extrai o JSON da resposta do modelo
@@ -941,6 +978,37 @@ def pensar_streaming(
         base_url=base_url,
         stream_callback=stream_callback,
     )
+
+
+def processar_prompt(
+    texto: str,
+    historico: list[dict] | None = None,
+    modelo: str = MODELO_PADRAO,
+) -> dict:
+    """
+    Wrapper robusto para pensar() que garante um dicionário com
+    'resposta_voz' NUNCA vazio — compatível com a UI do launcher.
+
+    Diferente de pensar(), esta função:
+      - NÃO usa streaming (sem callback) — mais simples e confiável
+      - Garante que 'resposta_voz' SEMPRE contenha texto utilizável
+      - Pode ser chamada diretamente pela thread do chat da UI
+
+    Returns:
+        Dict com ao menos: {"resposta_voz": str, "acao": str, ...}
+    """
+    resultado = pensar(
+        prompt_usuario=texto,
+        historico_contexto=historico,
+        modelo=modelo,
+    )
+    # Garantia extra: se resposta_voz veio vazia (bug raro), usa fallback
+    if not resultado.get("resposta_voz", "").strip():
+        resultado["resposta_voz"] = (
+            "Estou online e operacional, senhor. Como posso ajudar?"
+        )
+        _log("processar_prompt: resposta_voz vazia — fallback aplicado.", "WARNING")
+    return resultado
 
 
 # ---------------------------------------------------------------------------

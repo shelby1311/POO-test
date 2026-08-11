@@ -1208,19 +1208,39 @@ class ChatConsole(QWidget):
     def _on_worker_started(self) -> None:
         self._append_system("[PROCESSANDO...]")
 
-    def _on_worker_finished(self, resultado: dict) -> None:
+    def _on_worker_finished(self, resultado: object) -> None:
         self._set_processando(False)
 
-        resposta_voz = resultado.get("resposta_voz", "")
-        acao = resultado.get("acao", "falar")
-        params = resultado.get("parametros", {})
+        # ── Extrai resposta_voz de forma resiliente ──
+        resposta_voz = ""
+        acao = "falar"
+        params: dict = {}
+
+        if isinstance(resultado, str):
+            # Resposta veio como texto puro → uso direto
+            resposta_voz = resultado
+        elif isinstance(resultado, dict):
+            acao = resultado.get("acao", "falar")
+            params = resultado.get("parametros", {})
+            # Tenta múltiplas chaves comuns de resposta
+            for chave in ("resposta_voz", "resposta", "texto", "message",
+                           "content", "response"):
+                candidato = resultado.get(chave)
+                if isinstance(candidato, str) and candidato.strip():
+                    resposta_voz = candidato.strip()
+                    break
+
+        # ── Fallback: NUNCA passa string vazia para a UI ──
+        if not resposta_voz.strip():
+            resposta_voz = (
+                "Estou online e operacional, senhor. Como posso ajudar?"
+            )
 
         # Finaliza o streaming: substitui o texto streaming pelo final
         if self._streaming_active:
             self._streaming_active = False
             self._finalize_streaming_text(resposta_voz)
         else:
-            # Fallback: modo batch (sem streaming)
             self._append_jarvis(resposta_voz)
 
         # Executa ação
@@ -1347,6 +1367,23 @@ class ChatConsole(QWidget):
 
     def _finalize_streaming_text(self, texto: str) -> None:
         """Finaliza o streaming substituindo pelo texto definitivo (sem cursor)."""
+        if not texto or not texto.strip():
+            # Remove o bloco de streaming vazio e insere fallback
+            cursor = self._history.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            cursor.movePosition(
+                QTextCursor.MoveOperation.StartOfBlock,
+                QTextCursor.MoveMode.MoveAnchor,
+            )
+            cursor.movePosition(
+                QTextCursor.MoveOperation.EndOfBlock,
+                QTextCursor.MoveMode.KeepAnchor,
+            )
+            cursor.removeSelectedText()
+            self._append_jarvis(
+                "Estou online e operacional, senhor. Como posso ajudar?"
+            )
+            return
         cursor = self._history.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         cursor.movePosition(

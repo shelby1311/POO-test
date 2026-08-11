@@ -266,13 +266,24 @@ class SallesCore3DOpenGLWidget(QOpenGLWidget):
 
         mvp = projection * view * model
 
-        self._program.setUniformValue("uModelViewProjection", mvp)
-        self._program.setUniformValue("uColor", color)
-        self._program.setUniformValue(
-            "uGlowIntensity", 0.5 + self._pulse * 0.5)
-        self._program.setUniformValue("uTime", float(time.time() % 1000))
-        self._program.setUniformValue(
-            "uPointScale", float(min(w, h)) * 0.015)
+        # ── Uniform locations (busca única por frame) ──
+        loc_mvp = self._program.uniformLocation("uModelViewProjection")
+        loc_color = self._program.uniformLocation("uColor")
+        loc_glow = self._program.uniformLocation("uGlowIntensity")
+        loc_time = self._program.uniformLocation("uTime")
+        loc_point_scale = self._program.uniformLocation("uPointScale")
+
+        if loc_mvp != -1:
+            self._program.setUniformValue(loc_mvp, mvp)
+        if loc_color != -1:
+            self._program.setUniformValue(loc_color, color)
+        if loc_glow != -1:
+            self._program.setUniformValue(loc_glow, 0.5 + self._pulse * 0.5)
+        if loc_time != -1:
+            self._program.setUniformValue(loc_time, float(time.time() % 1000))
+        if loc_point_scale != -1:
+            self._program.setUniformValue(
+                loc_point_scale, float(min(w, h)) * 0.015)
 
         # Clear com cor de fundo
         from PySide6.QtGui import QOpenGLFunctions
