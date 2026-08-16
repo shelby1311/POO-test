@@ -29,3 +29,24 @@ gputil>=1.4.0
 
 # ── YouTube Transcript ──
 youtube-transcript-api>=0.6.0
+
+# ── Web Automation (opcional — Playwright) ──
+# playwright>=1.45.0
+#   Após instalar, rode: python -m playwright install chromium
+
+# ── Screen Context Inspector / OCR (opcional) ──
+# pytesseract>=0.3.10
+# Pillow>=10.0.0
+#   Requer o binário Tesseract OCR instalado no sistema.
+
+# ── Meeting Summarizer (opcional — gravação de áudio) ──
+# PyAudio>=0.2.13
+#   No Windows, prefira: pip install pipwin && pipwin install pyaudio
+
+# ── Database Assistant (opcional — drivers SQL) ──
+# psycopg2-binary>=2.9.0   # PostgreSQL
+# pymysql>=1.1.0           # MySQL
+
+# ── Virtual Lab / Cyber Range ──
+#   Requer o Docker Desktop (CLI `docker`) e/ou WSL2 instalados no host.
+#   Não há pacote pip necessário — o módulo usa subprocess.

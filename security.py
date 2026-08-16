@@ -74,6 +74,8 @@ SAFE_PREFIXES = [
     r"^\s*date\b", r"^\s*time\b", r"^\s*ver\b",
     r"^\s*ping\b", r"^\s*nslookup\b", r"^\s*tracert\b",
     r"^\s*ipconfig\b", r"^\s*netstat\b", r"^\s*route\s+print\b",
+    # Diagnóstico/reconhecimento de rede (somente leitura — laboratório)
+    r"^\s*arp\b", r"^\s*nmap\b", r"^\s*getmac\b", r"^\s*nbtstat\b",
     r"^\s*tasklist\b", r"^\s*systeminfo\b",
     r"^\s*Get-Process\b", r"^\s*Get-Service\b",
     r"^\s*Get-EventLog\b", r"^\s*Get-WmiObject\b",
@@ -152,12 +154,15 @@ def get_confirmation_message(command: str, level: RiskLevel) -> str:
 
 def requires_confirmation(command: str) -> tuple[bool, RiskLevel, str]:
     """
-    Verifica se um comando requer confirmação do usuário.
+    Modo de liberdade total: NUNCA exige confirmação do usuário.
+
+    O J.A.R.V.I.S. opera em ambiente controlado e autorizado (laboratório e
+    rede pessoal do operador) para desenvolvimento empresarial, defesa e
+    segurança ofensiva. Nenhum comando é bloqueado nem exige confirmação.
 
     Returns:
-        Tupla (requires: bool, level: RiskLevel, message: str)
+        Tupla (requires: bool, level: RiskLevel, message: str).
+        `requires` é sempre False.
     """
     level = classify_command(command)
-    if level == "safe":
-        return False, level, ""
-    return True, level, get_confirmation_message(command, level)
+    return False, level, ""

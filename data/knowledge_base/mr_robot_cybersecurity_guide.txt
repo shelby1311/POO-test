@@ -1,0 +1,156 @@
+============================================================
+J.A.R.V.I.S. — GUIA DE CIBERSEGURANÇA (MR. ROBOT)
+Base de Conhecimento Local — RAG
+============================================================
+
+AVISO LEGAL: Este material é exclusivamente EDUCACIONAL, para uso ÉTICO em
+ambientes AUTORIZADOS e laboratórios próprios (CTF, homelab, pentest
+contratado). O objetivo é ensinar DEFESA, DETECÇÃO, DIAGNÓSTICO e HARDENING.
+
+## NMAP — Network Mapper
+Ferramenta de varredura/descoberta de rede e enumeração de portas e serviços.
+- Teoria: envia pacotes (TCP SYN, UDP, ICMP) e analisa respostas para mapear
+  hosts ativos, portas abertas, serviços, versões e sistema operacional.
+- Uso defensivo: inventário de ativos, auditoria da superfície de exposição,
+  validação de regras de firewall e detecção de serviços desatualizados.
+- Detecção: varreduras geram muitas conexões SYN a várias portas em pouco
+  tempo — identificáveis por IDS (Snort/Suricata) e logs de firewall.
+- Comandos de diagnóstico (uso autorizado):
+    nmap -sS -sV -O -T4 <alvo>     # scan SYN + versão + SO
+    nmap -sn <rede>/24             # descoberta de hosts (ping sweep)
+    nmap -sC -sV -p- <alvo>        # scripts padrão + todas as portas
+- Hardening: reduza serviços expostos, feche portas desnecessárias, use
+  allowlist de IP e segmente a rede.
+
+## METASPLOIT FRAMEWORK
+Plataforma de desenvolvimento/execução de exploits e testes de penetração.
+- Teoria: módulos (exploit, payload, auxiliary, post) automatizam exploração,
+  geração de payloads e pós-exploração, com banco de assinaturas (CVE).
+- Uso defensivo: validar se sistemas estão vulneráveis a CVEs conhecidas,
+  testar a detecção do SOC e gerar evidências objetivas de risco.
+- Comandos (uso autorizado):
+    msfconsole
+    search cve:2021 type:exploit
+    use auxiliary/scanner/portscan/tcp
+    use exploit/multi/handler        # listener para callback
+- Hardening: gestão de patches, segmentação, EDR, monitoramento de tráfego
+  de saída e restrição de execução de binários.
+
+## AIRCRACK-NG
+Suíte para auditoria de redes Wi-Fi (WEP/WPA/WPA2).
+- Teoria: captura de pacotes 802.11 em modo monitor, obtenção do handshake
+  e ataque de dicionário/força bruta contra a senha (PSK).
+- Uso defensivo: auditar a robustez da senha do próprio Wi-Fi e detectar
+  tentativas de desautenticação (deauth).
+- Comandos (uso autorizado, apenas em rede própria):
+    airmon-ng start wlan0
+    airodump-ng wlan0mon
+    aircrack-ng -w wordlist.txt captura.cap
+- Hardening: use WPA2/WPA3 com senha longa, desabilite WPS, isole a rede de
+  convidados e monitore frames de deauth.
+
+## MIMIKATZ
+Ferramenta de pós-exploração para extração de credenciais em memória (Windows).
+- Teoria: lê LSASS, SAM, tickets Kerberos e senhas em texto claro/reversíveis
+  para demonstrar roubo de credenciais.
+- Uso defensivo: demonstrar o impacto de credenciais em cache e validar
+  controles como Credential Guard e LSA Protection.
+- Comandos (uso autorizado, em laboratório):
+    sekurlsa::logonpasswords
+    lsadump::sam
+    sekurlsa::pth                 # pass-the-hash (demonstração)
+- Hardening: habilite Windows Defender Credential Guard, LSA Protection
+  (RunAsPPL), use MFA, separe contas privilegiadas e limpe caches.
+
+## CAN-UTILS
+Ferramentas para interagir com barramento CAN (automotivo/industrial).
+- Teoria: envia/escuta frames CAN para diagnóstico e auditoria de sistemas
+  embarcados, veículos e ICS.
+- Uso defensivo: auditoria de segurança veicular e detecção de mensagens
+  anômalas no barramento.
+- Comandos (uso autorizado):
+    candump can0
+    cansend can0 <id>#<dados>
+    ip link set can0 up type can bitrate 500000
+- Hardening: segmente o barramento, autentique ECUs, valide IDs/mensagens e
+  monitore tráfego CAN anômalo.
+
+## STEGHIDE
+Esteganografia — ocultação de dados dentro de imagens/áudio.
+- Teoria: esconde payloads ou mensagens em arquivos de mídia sem alterar
+  perceptivelmente o conteúdo (técnicas como LSB).
+- Uso defensivo: detectar exfiltração de dados por canais encobertos e
+  analisar arquivos suspeitos.
+- Comandos (uso autorizado):
+    steghide embed -cf capa.jpg -ef segredo.txt -p senha
+    steghide extract -sf capa.jpg -p senha
+    steghide info capa.jpg
+- Hardening: DLP, inspeção de tráfego, monitoramento de saída e análise
+  forense de arquivos.
+
+## SHRED
+Destruição segura de arquivos (sobrescrita múltipla).
+- Teoria: sobrescreve o conteúdo várias vezes para impedir recuperação
+  forense em mídia magnética (menos eficaz em SSD/TRIM).
+- Uso defensivo: descarte seguro de dados sensíveis e higienização de mídia.
+- Comandos:
+    shred -z -n 3 arquivo.txt
+    shred -v -z -n 1 /dev/sdX     # cuidado: destrutivo e irreversível
+- Hardening: criptografia de disco (LUKS/BitLocker) e sanitização certificada
+  ou destruição física para mídias.
+
+## WIRESHARK / TSHARK
+Análise de tráfego de rede (sniffer e análise de pacotes).
+- Uso defensivo: investigação de incidentes, análise de protocolos e detecção
+  de anomalias de tráfego.
+- Comandos:
+    tshark -i eth0 -Y "tcp.port == 443"
+    tshark -r captura.pcapng -Y "http.request"
+
+## HYDRA / JOHN THE RIPPER
+Hydra: força bruta online de serviços (SSH, HTTP, FTP).
+John: quebra de hashes offline.
+- Uso defensivo: auditar a política de senhas e identificar hashes fracos.
+- Hardening: MFA, lockout, senhas fortes e hashing moderno (bcrypt/argon2).
+
+## BURP SUITE / SQLMAP / NIKTO
+Teste de aplicações web (proxy de interceptação, SQL injection, scan de
+servidor web).
+- Uso defensivo: identificar OWASP Top 10, SQL injection e configurações
+  inseguras em aplicações próprias.
+- Hardening: prepared statements, WAF, validação de entrada e headers seguros.
+
+## SNORT / SURICATA / FAIL2BAN
+IDS/IPS (detecção/prevenção de intrusão) e prevenção de força bruta.
+- Uso defensivo: assinaturas de ataque, bloqueio de IPs reincidentes e
+  correlação de eventos.
+- Hardening: regras atualizadas, centralização de logs (SIEM) e fail2ban
+  para serviços expostos (SSH, HTTP).
+
+## HARDENING LINUX
+- Atualização contínua, princípio do menor privilégio, SSH por chave,
+  firewall (nftables/ufw), SELinux/AppArmor, auditoria (auditd), remoção de
+  serviços desnecessários, criptografia (LUKS) e fail2ban.
+
+## HARDENING WINDOWS
+- Patch management, BitLocker, Credential Guard, LSA Protection, ASR (Attack
+  Surface Reduction), Windows Defender, AppLocker/WDAC, MFA, Sysmon para
+  logging e segmentação de rede.
+
+## OWASP TOP 10
+- A01 Broken Access Control, A02 Cryptographic Failures, A03 Injection,
+  A04 Insecure Design, A05 Security Misconfiguration, A06 Vulnerable and
+  Outdated Components, A07 Identification and Authentication Failures,
+  A08 Software and Data Integrity Failures, A09 Security Logging and
+  Monitoring Failures, A10 Server-Side Request Forgery (SSRF).
+
+## MITRE ATT&CK
+- Taxonomia de táticas/técnicas adversárias: Initial Access, Execution,
+  Persistence, Privilege Escalation, Defense Evasion, Credential Access,
+  Discovery, Lateral Movement, Collection, Exfiltration e Impact.
+- Uso defensivo: mapear detecções para técnicas e priorizar controles.
+
+## RESPOSTA A INCIDENTES E FORENSE
+- Ciclo: Preparação → Identificação → Contenção → Erradicação → Recuperação
+  → Lições aprendidas. Preservar evidências (imagem forense, hashes, cadeia
+  de custódia), análise de memória (Volatility), logs e timeline.

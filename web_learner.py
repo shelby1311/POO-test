@@ -27,7 +27,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Optional
 
-from config_manager import carregar_configuracao
+from config_manager import carregar_configuracao, registrar_evento_telemetria
 
 # ---------------------------------------------------------------------------
 # Constantes
@@ -225,8 +225,18 @@ def _buscar_duckduckgo(query: str, max_resultados: int = MAX_RESULTADOS_BUSCA) -
 # Raspagem de páginas
 # ---------------------------------------------------------------------------
 
+def _normalizar_url(url: str) -> str:
+    """Codifica caracteres não-ASCII da URL (evita UnicodeEncodeError)."""
+    try:
+        url.encode("ascii")
+        return url
+    except UnicodeEncodeError:
+        return urllib.parse.quote(url, safe=":/?#[]@!$&'()*+,;=%")
+
+
 def _raspar_pagina(url: str) -> Optional[str]:
     """Baixa e extrai o texto principal de uma página web."""
+    url = _normalizar_url(url)
     _log(f"Raspando: {url[:80]}...", "DEBUG")
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
@@ -984,6 +994,7 @@ def pesquisar_e_aprender(
         Número total de chunks armazenados.
     """
     _log(f"Iniciando pesquisa e aprendizado sobre: '{topico}'")
+    registrar_evento_telemetria("pesquisa")
 
     # 1. Busca DuckDuckGo
     resultados = _buscar_duckduckgo(topico)
@@ -1034,6 +1045,99 @@ def pesquisar_e_aprender(
         f"{total_chunks} chunk(s) armazenados."
     )
     return total_chunks
+
+
+def _deduplicar_trechos(trechos: list[str]) -> list[str]:
+    """Remove trechos redundantes (deduplicação por similaridade simples)."""
+    vistos: set[str] = set()
+    unicos: list[str] = []
+    for t in trechos:
+        chave = re.sub(r"\s+", " ", t.strip())[:120].lower()
+        if chave and chave not in vistos:
+            vistos.add(chave)
+            unicos.append(t.strip())
+    return unicos
+
+
+def _gerar_relatorio_markdown(
+    topico: str,
+    snippets: list[str],
+    trechos: list[str],
+    fontes: list[str],
+    data: str,
+) -> str:
+    """Monta o documento Markdown técnico do Deep Research."""
+    intro = "\n".join(f"- {s}" for s in snippets if s) or "_Sem resumo disponível._"
+    corpo = "\n\n".join(trechos) if trechos else "_Sem conteúdo extraído._"
+    refs = "\n".join(fontes) if fontes else "- Nenhuma fonte."
+    return (
+        f"# Research: {topico}\n\n"
+        f"> Relatório técnico gerado por J.A.R.V.I.S. Deep Research — {data}\n\n"
+        f"## 1. Introdução\n\n{intro}\n\n"
+        f"## 2. Arquitetura / Conceitos\n\n{corpo}\n\n"
+        f"## 3. Sintaxe / Comandos\n\n{corpo}\n\n"
+        f"## 4. Melhores Práticas\n\n"
+        f"- Valide as informações em documentação oficial.\n"
+        f"- Aplique os padrões consolidados com cautela e testes.\n\n"
+        f"## Referências\n\n{refs}\n"
+    )
+
+
+def pesquisa_profunda(topico: str, max_paginas: int = 3) -> tuple[str, str]:
+    """
+    Deep Research Engine: pesquisa, consolida e gera um relatório Markdown
+    técnico sobre o tópico, salvo em `data/downloads/Research_<Tema>.md`.
+
+    Returns:
+        Tupla (caminho_arquivo, resumo). caminho vazio indica falha.
+    """
+    _log(f"Deep Research iniciado: '{topico}'")
+    registrar_evento_telemetria("pesquisa")
+
+    config = carregar_configuracao()
+    downloads = Path(config.get("data_directory", "data")) / "downloads"
+    downloads.mkdir(parents=True, exist_ok=True)
+
+    resultados = _buscar_duckduckgo(topico, max_resultados=5)
+    if not resultados:
+        return "", "Nenhum resultado encontrado na web."
+
+    snippets = [r.get("snippet", "") for r in resultados if r.get("snippet")]
+    fontes: list[str] = []
+    trechos: list[str] = []
+    paginas = 0
+
+    for res in resultados:
+        if paginas >= max_paginas:
+            break
+        url = res.get("url", "")
+        if not url.startswith("http"):
+            continue
+        texto = _raspar_pagina(url)
+        if texto and len(texto) > 100:
+            trechos.append(texto[:3000])
+            fontes.append(f"- [{res.get('titulo', url)}]({url})")
+            paginas += 1
+        time.sleep(0.4)
+
+    trechos_unicos = _deduplicar_trechos(trechos)
+
+    tema_slug = re.sub(r"[^a-zA-Z0-9]+", "_", topico).strip("_") or "tema"
+    data = datetime.now().strftime("%Y-%m-%d %H:%M")
+    md = _gerar_relatorio_markdown(topico, snippets, trechos_unicos, fontes, data)
+
+    caminho = downloads / f"Research_{tema_slug}.md"
+    try:
+        caminho.write_text(md, encoding="utf-8")
+    except OSError as exc:
+        return "", f"Falha ao salvar relatório: {exc}"
+
+    resumo = (
+        f"Deep Research concluído: {len(trechos_unicos)} trecho(s) consolidado(s), "
+        f"{len(fontes)} fonte(s).\nRelatório: {caminho.name}"
+    )
+    _log(resumo)
+    return str(caminho), resumo
 
 
 def consultar_memoria(query: str, n_resultados: int = 3) -> list[dict]:

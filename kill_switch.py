@@ -3,7 +3,7 @@ kill_switch.py — Trava de Emergência do J.A.R.V.I.S.
 
 Monitora teclado e mouse em segundo plano. Aciona uma flag global de parada
 emergencial quando o usuário pressiona a hotkey configurada ou move o mouse
-bruscamente (>60 px em um único evento).
+bruscamente (>1200 px em um único evento).
 
 Oferece funções para verificação periódica durante tarefas automatizadas,
 permitindo pausar, retomar ou cancelar a execução.
@@ -97,9 +97,9 @@ def _resolver_tecla(nome: str):
 _teclado_listener: Optional[keyboard.Listener] = None
 _mouse_listener: Optional[mouse.Listener] = None
 
-# Última posição do mouse para cálculo de delta
-_ultimo_x = 0
-_ultimo_y = 0
+# Última posição do mouse para cálculo de delta (None = ainda não inicializada)
+_ultimo_x: Optional[int] = None
+_ultimo_y: Optional[int] = None
 _pos_lock = threading.Lock()
 
 
@@ -123,6 +123,13 @@ def _on_move(limiar_px: int, x: int, y: int) -> None:
     """Callback do listener de mouse: detecta movimento brusco."""
     global _ultimo_x, _ultimo_y
     with _pos_lock:
+        # Primeira amostra: apenas registra a posição, sem calcular delta
+        # (evita falso positivo causado pela posição inicial 0,0).
+        if _ultimo_x is None or _ultimo_y is None:
+            _ultimo_x = x
+            _ultimo_y = y
+            return
+
         dx = x - _ultimo_x
         dy = y - _ultimo_y
         _ultimo_x = x
@@ -196,7 +203,7 @@ def verificar_interrupcao() -> bool:
 
 def iniciar_monitoramento(
     hotkey: Optional[str] = None,
-    limiar_mouse_px: int = 60,
+    limiar_mouse_px: int = 1200,
 ) -> None:
     """
     Inicia os listeners de teclado e mouse em threads daemon.
@@ -230,8 +237,8 @@ def iniciar_monitoramento(
         _motivo_acionamento = None  # type: ignore[assignment]
     with _pos_lock:
         global _ultimo_x, _ultimo_y
-        _ultimo_x = 0
-        _ultimo_y = 0
+        _ultimo_x = None
+        _ultimo_y = None
 
     # Listener de teclado
     _teclado_listener = keyboard.Listener(
@@ -285,7 +292,7 @@ if __name__ == "__main__":
     print()
     print("Instruções:")
     print(f"  - Pressione a hotkey configurada para acionar a trava.")
-    print("  - Mova o mouse rapidamente (>60 px) para acionar a trava.")
+    print("  - Mova o mouse rapidamente (>1200 px) para acionar a trava.")
     print("  - O monitoramento ficará ativo por 10 segundos.")
     print()
 

@@ -361,6 +361,101 @@ class HardwareManager:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# SCREEN CONTEXT INSPECTOR — Captura instantânea + extração de texto (OCR)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _diretorio_screenshots() -> Path:
+    """Devolve (criando se necessário) o diretório de screenshots."""
+    try:
+        from config_manager import carregar_configuracao
+        data_dir = Path(carregar_configuracao().get("data_directory", "data"))
+    except Exception:
+        data_dir = Path("data")
+    screenshots = data_dir / "screenshots"
+    screenshots.mkdir(parents=True, exist_ok=True)
+    return screenshots
+
+
+def extrair_texto_imagem(caminho_imagem: str) -> str:
+    """
+    Extrai texto de uma imagem via OCR (pytesseract). Retorna string vazia se
+    o OCR não estiver disponível, sem lançar exceção.
+    """
+    try:
+        import pytesseract
+        from PIL import Image
+    except ImportError:
+        return ""
+
+    try:
+        with Image.open(caminho_imagem) as imagem:
+            return pytesseract.image_to_string(imagem, lang="por+eng").strip()
+    except Exception as exc:
+        _log(f"OCR indisponível: {exc}", "WARNING")
+        return ""
+
+
+def capturar_contexto_tela(caminho_destino: Optional[str] = None) -> dict:
+    """
+    Captura a tela principal, salva em PNG e extrai o texto/elementos visuais.
+
+    Retorna um dict com:
+      - sucesso: bool
+      - caminho: caminho absoluto do PNG salvo
+      - texto:   texto extraído via OCR (pode ser vazio se OCR indisponível)
+      - dimensoes: {"largura": int, "altura": int}
+      - timestamp: ISO-8601 da captura
+    """
+    resultado: dict = {
+        "sucesso": False,
+        "caminho": "",
+        "texto": "",
+        "dimensoes": {},
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    try:
+        import pyautogui
+    except ImportError:
+        resultado["texto"] = "[pyautogui indisponível para captura de tela]"
+        return resultado
+
+    if caminho_destino is None:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        caminho_destino = str(_diretorio_screenshots() / f"snap_{ts}.png")
+
+    try:
+        imagem = pyautogui.screenshot()
+        imagem.save(caminho_destino)
+        resultado["caminho"] = os.path.abspath(caminho_destino)
+        resultado["dimensoes"] = {"largura": imagem.width, "altura": imagem.height}
+        resultado["texto"] = extrair_texto_imagem(caminho_destino)
+        resultado["sucesso"] = True
+        _log(f"Contexto de tela capturado: {resultado['caminho']}")
+    except Exception as exc:
+        resultado["texto"] = f"Falha na captura de tela: {exc}"
+        _log(resultado["texto"], "ERROR")
+
+    return resultado
+
+
+def montar_contexto_visual(resultado: dict) -> str:
+    """Formata o dict de captura em um bloco de contexto injetável no brain."""
+    if not isinstance(resultado, dict):
+        return ""
+    linhas = [
+        "[CAPTURA DE TELA]",
+        f"Caminho: {resultado.get('caminho', '')}",
+        f"Resolução: {resultado.get('dimensoes', {})}",
+        f"Instante: {resultado.get('timestamp', '')}",
+        "",
+        "TEXTO EXTRAÍDO (OCR):",
+        resultado.get("texto", "") or "(sem texto reconhecido)",
+    ]
+    return "\n".join(linhas)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Teste
 # ═══════════════════════════════════════════════════════════════════════════
 

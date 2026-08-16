@@ -1,0 +1,18 @@
+{
+  "aprendizados": [
+    {
+      "timestamp": "2026-08-16T11:57:05",
+      "comando_ou_prompt": "nmap -sn <rede>/24",
+      "stdout_stderr": "O sistema não pode encontrar o arquivo especificado.",
+      "causa_raiz": "Falha genérica de execução",
+      "solucao_aplicada": "Revisar o comando e a saída de erro completa."
+    },
+    {
+      "timestamp": "2026-08-16T11:57:39",
+      "comando_ou_prompt": "nmap -sn <rede>/24",
+      "stdout_stderr": "O sistema não pode encontrar o arquivo especificado.",
+      "causa_raiz": "Falha genérica de execução",
+      "solucao_aplicada": "Revisar o comando e a saída de erro completa."
+    }
+  ]
+}

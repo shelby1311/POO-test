@@ -67,40 +67,63 @@ def _log(mensagem: str, nivel: str = "INFO") -> None:
 
 
 def _obter_engine() -> pyttsx3.Engine:
-    """Singleton do engine TTS com voz pt-BR configurada."""
+    """Singleton do engine TTS com voz masculina estilo J.A.R.V.I.S. configurada."""
     global _engine
     if _engine is None:
         _engine = pyttsx3.init()
-        _configurar_voz_portugues(_engine)
+        _configurar_voz_jarvis(_engine)
     return _engine
 
 
-def _configurar_voz_portugues(engine: pyttsx3.Engine) -> None:
-    """Seleciona a voz em português (Maria) se disponível."""
+# Palavras-chave usadas para identificar vozes masculinas no SAPI5.
+_VOZES_MASCULINAS = (
+    "daniel", "antonio", "jose", "david", "mark", "george", "ryan",
+    "christopher", "guy", "eric", "prabhat", "enrique", "male",
+)
+
+
+def _configurar_voz_jarvis(engine: pyttsx3.Engine) -> None:
+    """
+    Seleciona uma voz MASCULINA (estilo J.A.R.V.I.S. — calma, grave e articulada).
+
+    Prioridade de seleção:
+      1. Voz masculina em português (pt-BR);
+      2. Voz masculina em inglês (timbre de mordomo britânico);
+      3. Qualquer voz em português;
+      4. Qualquer voz disponível.
+    """
     voices = engine.getProperty("voices")
+    voz_pt_masc = None
+    voz_masc = None
     voz_pt = None
-    voz_en = None
+    voz_any = None
 
     for v in voices:
+        nome = (v.name or "").lower()
         langs = [l.lower() for l in (v.languages or [])]
-        if any("pt" in l for l in langs) or "brazil" in v.name.lower():
-            voz_pt = v
-            break
-        if any("en" in l for l in langs):
-            voz_en = v
+        gender = str(getattr(v, "gender", "") or "").lower()
+        is_pt = any("pt" in l for l in langs) or "brazil" in nome
+        is_masc = (gender == "male") or any(k in nome for k in _VOZES_MASCULINAS)
 
-    if voz_pt:
-        engine.setProperty("voice", voz_pt.id)
-        _log(f"Voz TTS: {voz_pt.name}", "INFO")
-    elif voz_en:
-        engine.setProperty("voice", voz_en.id)
-        _log(f"Voz pt-BR nao encontrada. Fallback: {voz_en.name}", "WARNING")
+        if is_pt and is_masc and voz_pt_masc is None:
+            voz_pt_masc = v
+        elif is_masc and voz_masc is None:
+            voz_masc = v
+        elif is_pt and voz_pt is None:
+            voz_pt = v
+        elif voz_any is None:
+            voz_any = v
+
+    escolhida = voz_pt_masc or voz_masc or voz_pt or voz_any
+    if escolhida is not None:
+        engine.setProperty("voice", escolhida.id)
+        _log(f"Voz TTS (J.A.R.V.I.S.): {escolhida.name}", "INFO")
     else:
         _log("Nenhuma voz SAPI5 detectada.", "WARNING")
 
-    # Ajustes de fala
-    engine.setProperty("rate", 190)     # palavras/minuto (padrão ~200)
-    engine.setProperty("volume", 0.9)   # 0.0 a 1.0
+    # Ajustes de fala — tom grave, calmo e articulado (estilo Jarvis).
+    engine.setProperty("rate", 178)     # palavras/minuto (mais pausado e claro)
+    engine.setProperty("volume", 0.95)  # 0.0 a 1.0
 
 
 def _obter_recognizer() -> tuple[sr.Recognizer, Optional[sr.Microphone]]:
